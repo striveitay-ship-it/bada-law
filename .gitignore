@@ -1,0 +1,6 @@
+node_modules/
+reel/assets/clips
+reel/out/work/
+*.mkv
+*.parts/
+__pycache__/

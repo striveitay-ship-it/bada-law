@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080">
+<title>bada.law — Reel</title>
+<style>
+@font-face{font-family:'Heebo';src:url(assets/fonts/Heebo-hebrew.woff2) format('woff2');font-weight:100 900;unicode-range:U+0590-05FF,U+200C-2010,U+20AA,U+25CC,U+FB1D-FB4F;}
+@font-face{font-family:'Heebo';src:url(assets/fonts/Heebo-latin.woff2) format('woff2');font-weight:100 900;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}
+:root{--canvas:#E9E8E4;--ink:#0B0D11;--navy:#2C3A52;--slate:#556886;--silver:#C4CAD3;--mute:#6B717C;}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--canvas);}
+#stage{position:relative;width:1080px;height:1920px;overflow:hidden;background:var(--canvas);font-family:'Heebo',sans-serif;-webkit-font-smoothing:antialiased;text-rendering:geometricPrecision;}
+.a{position:absolute;left:0;top:0;}
+.t{position:absolute;left:0;top:0;white-space:nowrap;line-height:1;direction:rtl;visibility:hidden;}
+.ltr{direction:ltr;}
+.ic{fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.hl{position:relative;display:inline-block;}
+.hl i{position:absolute;left:-10px;right:-10px;top:8%;bottom:4%;border-radius:12px;background:rgba(85,104,134,.22);transform-origin:100% 50%;z-index:-1;}
+.hlw{position:relative;z-index:0;}
+.odo{display:inline-block;overflow:hidden;height:1em;vertical-align:top;}
+.odo span{display:block;height:1em;line-height:1;}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <clipPath id="cpLogo" clipPathUnits="userSpaceOnUse"><path id="cpLogoPath" d=""/></clipPath>
+  </defs>
+</svg>
+<script>
+(() => {
+'use strict';
+// ======================================================================
+// Time grid: 120 BPM, 64 beats, 32 s. The last frame flows into the first.
+// ======================================================================
+const BPM = 120, BEAT = 60 / BPM, NB = 64, T = NB * BEAT;
+const b = n => n * BEAT;
+const COL = { canvas:'#E9E8E4', ink:'#0B0D11', navy:'#2C3A52', slate:'#556886', silver:'#C4CAD3', mute:'#6B717C', white:'#FFFFFF', line:'#DEDDD8' };
+
+// ---------- math ----------
+const clamp = (x, a, c) => Math.max(a, Math.min(c, x));
+const c01 = x => clamp(x, 0, 1);
+const lerp = (a, c, u) => a + (c - a) * u;
+const eOut3 = u => 1 - Math.pow(1 - u, 3);
+const eIn2 = u => u * u;
+const eInOut3 = u => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const wrap = t => ((t % T) + T) % T;
+
+// Closed-form spring step response: starts at rest at 0, settles at 1.
+function S(tau, resp, damp) {
+  if (resp <= 0) return tau >= 0 ? 1 : 0;
+  if (tau <= 0) return 0;
+  const w = 2 * Math.PI / resp;
+  if (damp >= 1) { const x = w * tau; return 1 - Math.exp(-x) * (1 + x); }
+  const wd = w * Math.sqrt(1 - damp * damp);
+  return 1 - Math.exp(-damp * w * tau) * (Math.cos(wd * tau) + (damp * w / wd) * Math.sin(wd * tau));
+}
+// A value whose target changes many times = sum of one spring per change.
+// Each change also contributes from the previous loop, so the function is periodic in T.
+const TRACKS = [];
+class Tr {
+  constructor(v0, resp = .5, damp = .86, name = '') { this.v0 = v0; this.last = v0; this.ev = []; this.r = resp; this.d = damp; this.name = name; TRACKS.push(this); }
+  to(t, v, r = this.r, d = this.d) { const dv = v - this.last; if (Math.abs(dv) > 1e-9) this.ev.push([t, dv, r, d]); this.last = v; return this; }
+  jump(t, v) { return this.to(t, v, 0, 1); }
+  at(t) { let v = this.v0; for (const e of this.ev) v += e[1] * (S(t - e[0], e[2], e[3]) + S(t - e[0] + T, e[2], e[3])); return v; }
+}
+const hex = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+class TrC {
+  constructor(h, r = .4, d = 1) { this.c = hex(h).map(v => new Tr(v, r, d)); }
+  to(t, h, r, d) { hex(h).forEach((v, i) => this.c[i].to(t, v, r, d)); return this; }
+  jump(t, h) { hex(h).forEach((v, i) => this.c[i].jump(t, v)); return this; }
+  rgb(t) { return this.c.map(tr => clamp(tr.at(t), 0, 255)); }
+  at(t) { const [r, g, bb] = this.rgb(t); return `rgb(${r.toFixed(1)},${g.toFixed(1)},${bb.toFixed(1)})`; }
+}
+// Press pulse: dips then recovers around a click at tc (periodic).
+function pulse(t, tc, amp, down = .16, up = .34) {
+  let v = 0;
+  for (const k of [0, T, -T]) { const u = t + k; v += amp * (S(u - (tc - .07), down, .8) - S(u - (tc + .05), up, .82)); }
+  return v;
+}
+// Presence of an element entering at a and exiting at z (periodic). Returns {v, s}.
+function vis(t, a, z, inD = .26, outD = .14) {
+  let best = 0, side = 1;
+  for (const k of [0, T, -T]) {
+    const u = t + k;
+    if (u < a || u >= z + outD) continue;
+    let v, s;
+    if (u < z) { v = eOut3(c01((u - a) / inD)); s = 1; }
+    else { v = eOut3(c01((z - a) / inD)) * (1 - eIn2(c01((u - z) / outD))); s = -1; }
+    if (v > best) { best = v; side = s; }
+  }
+  return { v: best, s: side };
+}
+const inWin = (t, a, z) => { for (const k of [0, T, -T]) { const u = t + k; if (u >= a && u < z) return true; } return false; };
+const since = (t, a) => { const d = wrap(t - a); return d; };  // time since a (periodic)
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+function mk(tag, parent, cls, style, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (style) e.style.cssText = style;
+  if (html != null) e.innerHTML = html;
+  parent.appendChild(e);
+  return e;
+}
+const SVGNS = 'http://www.w3.org/2000/svg';
+const ICONS = {
+  car: '<path d="m21 8-2 2-1.5-3.7A2 2 0 0 0 15.646 5H8.4a2 2 0 0 0-1.903 1.257L5 10 3 8"/><path d="M7 14h.01"/><path d="M17 14h.01"/><rect width="18" height="8" x="3" y="10" rx="2"/><path d="M5 18v2"/><path d="M19 18v2"/>',
+  filex: '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path class="x" d="m14.5 12.5-5 5"/><path class="x" d="m9.5 12.5 5 5"/>',
+  hourglass: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  phone: '<path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  chev: '<path d="m15 18-6-6 6-6"/>',
+};
+// All icons render with the same on-screen stroke: 3.4px at their drawn size.
+const STROKE = 3.4;
+function icon(parent, name, size, color, style = '') {
+  const s = document.createElementNS(SVGNS, 'svg');
+  s.setAttribute('viewBox', '0 0 24 24');
+  s.setAttribute('width', size); s.setAttribute('height', size);
+  s.setAttribute('class', 'ic a');
+  s.style.cssText = `stroke:${color};stroke-width:${(STROKE * 24 / size).toFixed(3)};overflow:visible;` + style;
+  s.innerHTML = ICONS[name];
+  s.querySelectorAll('path,rect,circle').forEach(p => p.setAttribute('pathLength', '1'));
+  parent.appendChild(s);
+  return s;
+}
+function drawIcon(svg, p, sel = 'path,rect,circle') {
+  svg.querySelectorAll(sel).forEach(el => { el.style.strokeDasharray = '1 1'; el.style.strokeDashoffset = (1 - c01(p)).toFixed(4); });
+}
+
+// ======================================================================
+// Scene graph
+// ======================================================================
+const stage = $('stage');
+const world = mk('div', stage, 'a', 'width:1080px;height:1920px;transform-origin:0 0;');
+const shadow = '0 50px 110px -30px rgba(18,24,36,.30), 0 14px 34px -14px rgba(18,24,36,.22)';
+const shape = mk('div', world, 'a', `overflow:hidden;box-shadow:${shadow};transform-origin:50% 50%;`);
+const shapeIn = mk('div', shape, 'a', 'width:1080px;height:1920px;');
+const onCanvas = mk('div', world, 'a', 'width:1080px;height:1920px;'); // text that lives on the canvas (outside the shape)
+const media = mk('div', world, 'a', 'overflow:hidden;background:#11151c;');
+const mImg = [mk('img', media, 'a'), mk('img', media, 'a')];
+mImg.forEach(im => { im.decoding = 'sync'; im.style.transformOrigin = '0 0'; });
+const mIcon = mk('div', media, 'a', 'width:100%;height:100%;background:#fff;visibility:hidden;');
+const mIconSvg = icon(mIcon, 'phone', 46, COL.navy, 'left:50%;top:50%;transform:translate(-50%,-50%);');
+const mRing = mk('div', world, 'a', 'border-radius:50%;border:4px solid #fff;visibility:hidden;');
+const worldTop = mk('div', world, 'a', 'width:1080px;height:1920px;');
+const ov = mk('div', stage, 'a', 'width:1080px;height:1920px;');
+const cursorEl = mk('div', stage, 'a', 'transform-origin:0 0;filter:drop-shadow(0 6px 10px rgba(0,0,0,.22));');
+cursorEl.innerHTML = '<svg width="36" height="52" viewBox="-2 -2 36 52" style="display:block;overflow:visible"><path d="M1.5 1.5 L1.5 38.5 L10.6 30.4 L16.6 44.6 L23.4 41.7 L17.4 27.8 L29.6 27.8 Z" fill="#0B0D11" stroke="#fff" stroke-width="2.6" stroke-linejoin="round"/></svg>';
+
+// ---------- tracks: shape, camera, media, cursor ----------
+const SH = { x: new Tr(540), y: new Tr(900), w: new Tr(300), h: new Tr(300), r: new Tr(70), col: new TrC(COL.navy) };
+function shapeTo(t, s, r = .55, d = .86) {
+  SH.x.to(t, s.x, r, d); SH.y.to(t, s.y, r, d); SH.w.to(t, s.w, r, d); SH.h.to(t, s.h, r, d); SH.r.to(t, s.r, r, d);
+  if (s.col) SH.col.to(t, s.col, r * .7, 1);
+}
+function shapeJump(t, s) { ['x','y','w','h','r'].forEach(k => SH[k].jump(t, s[k])); if (s.col) SH.col.jump(t, s.col); }
+const CAM = { x: new Tr(540), y: new Tr(915), lz: new Tr(Math.log(1.7)) };
+function camTo(t, x, y, z, r = .7, d = .9) { CAM.x.to(t, x, r, d); CAM.y.to(t, y, r, d); CAM.lz.to(t, Math.log(z), r, d); }
+function camJump(t, x, y, z) { CAM.x.jump(t, x); CAM.y.jump(t, y); CAM.lz.jump(t, Math.log(z)); }
+const MD = { x: new Tr(540), y: new Tr(900), w: new Tr(0), h: new Tr(0), r: new Tr(0), o: new Tr(0) };
+function mediaTo(t, m, r = .55, d = .86) { ['x','y','w','h','r'].forEach(k => MD[k].to(t, m[k], r, d)); if (m.o != null) MD.o.to(t, m.o, .25, 1); }
+function mediaJump(t, m) { ['x','y','w','h','r','o'].forEach(k => { if (m[k] != null) MD[k].jump(t, m[k]); }); }
+const CUR = { x: new Tr(560), y: new Tr(930) };
+function curTo(t, x, y, r = .5, d = .9) { CUR.x.to(t, x, r, d); CUR.y.to(t, y, r, d); }
+const SC = new Tr(1); // shape scale (success pulse)
+
+// ---------- sound events (read by the audio builder) ----------
+const EVENTS = [];
+const ev = (t, k, extra = {}) => EVENTS.push(Object.assign({ t: +t.toFixed(4), k }, extra));
+const CLICKS = [];   // cursor clicks (press pulse)
+const click = (t, k = 'click') => { CLICKS.push(t); ev(t, k); };
+
+// ======================================================================
+// ACT 1 — ICON → notification pill with three questions (b0–b5)
+// ======================================================================
+const ICON = { x: 540, y: 900, w: 300, h: 300, r: 70, col: COL.navy };
+const QUEST = [
+  { t: b(0), text: 'נפגעתם בתאונת דרכים?', icon: 'car' },
+  { t: b(2), text: 'ביטוח לאומי דחה אתכם?', icon: 'filex' },
+  { t: b(4), text: 'מחכים לוועדה רפואית?', icon: 'hourglass' },
+];
+const PILL = { h: 150, r: 75, padL: 46, gap: 26, disc: 104, padR: 23 };
+const pillDisc = mk('div', shapeIn, 'a', `width:${PILL.disc}px;height:${PILL.disc}px;border-radius:50%;background:${COL.navy};visibility:hidden;`);
+QUEST.forEach(q => {
+  q.el = mk('div', shapeIn, 't', `font-size:47px;font-weight:600;color:#fff;letter-spacing:-.005em;`, q.text);
+  q.ic = icon(pillDisc, q.icon, 50, '#fff', 'left:27px;top:27px;visibility:hidden;');
+});
+
+// ======================================================================
+// ACT 2 — statement card (b6–b9)
+// ======================================================================
+const ST = { x: 540, y: 900, w: 940, h: 1000, r: 72, col: COL.ink };
+const stL1 = mk('div', shapeIn, 't', 'font-size:176px;font-weight:800;color:#fff;letter-spacing:-.02em;visibility:visible;display:flex;gap:44px;');
+const stW = [mk('span', stL1, '', 'display:inline-block;', 'אתם'), mk('span', stL1, '', 'display:inline-block;', 'לא')];
+const stL2 = mk('div', shapeIn, 't', 'font-size:338px;font-weight:900;color:#fff;letter-spacing:-.03em;', 'לבד.');
+const stSub = mk('div', shapeIn, 't', `font-size:52px;font-weight:500;color:${COL.silver};`, 'יש מי שהולך איתכם <span class="hl2" style="position:relative;display:inline-block;color:#fff">עד הסוף<i style="position:absolute;left:0;right:0;bottom:-10px;height:5px;border-radius:3px;background:#fff;transform-origin:100% 50%;display:block"></i></span>.');
+
+// ======================================================================
+// ACT 3 — logo build (b10–b19) + dive into the monogram (b19–b21)
+// ======================================================================
+const LG_SQ = { x: 540, y: 900, w: 880, h: 880, r: 80, col: COL.navy };
+const LG_TALL = { x: 540, y: 900, w: 880, h: 936, r: 80, col: COL.navy };
+const LP = { x: new Tr(540), y: new Tr(900), s: new Tr(600) };   // logo placement (world)
+const LS = new Tr(1);                                              // lock pulse
+// piece polygons in logo units (1254 square) — M left, M right, B bottom, B top
+const U1 = x => 203 + 0.684 * (x - 118), L1 = x => 370 + 0.694 * (x - 175);
+const U2 = x => 553 - 0.688 * (x - 630), L2 = x => 686 - 0.698 * (x - 630);
+const PIECES = [
+  { poly: [[40,1200],[40,U1(40)],[630,U1(630)],[630,L1(630)],[195,L1(195)],[195,1200]], t: b(11), from: [-640, 130, -9] },
+  { poly: [[1214,1200],[1214,U2(1214)],[630,U2(630)],[630,L2(630)],[1060,L2(1060)],[1060,1200]], t: b(11), from: [640, 130, 9] },
+  { poly: [[195,1200],[195,L1(195)],[630,L1(630)],[1060,L2(1060)],[1060,1200]], t: b(12), from: [0, 760, 0] },
+  { poly: [[200,80],[1060,80],[1060,U2(1060)],[630,U2(630)],[200,U1(200)]], t: b(13), from: [90, -760, 5] },
+];
+const lgClip = mk('div', ov, 'a', 'width:1080px;height:1920px;');
+PIECES.forEach(p => {
+  p.el = mk('img', lgClip, 'a', 'width:1254px;height:1254px;transform-origin:0 0;visibility:hidden;');
+  p.el.src = 'assets/logo_mono.png';
+  p.el.style.clipPath = 'polygon(' + p.poly.map(([x, y]) => `${(x / 12.54).toFixed(3)}% ${(y / 12.54).toFixed(3)}%`).join(',') + ')';
+  p.dx = new Tr(p.from[0]).to(p.t, 0, .46, .8).jump(b(20), p.from[0]);
+  p.dy = new Tr(p.from[1]).to(p.t, 0, .46, .8).jump(b(20), p.from[1]);
+  p.rot = new Tr(p.from[2]).to(p.t, 0, .5, .82).jump(b(20), p.from[2]);
+  p.c = [p.poly.reduce((a, q) => a + q[0], 0) / p.poly.length, p.poly.reduce((a, q) => a + q[1], 0) / p.poly.length];
+});
+const lgFull = mk('img', lgClip, 'a', 'width:1254px;height:1254px;transform-origin:0 0;visibility:hidden;');
+lgFull.src = 'assets/logo_mono.png';
+const sheenBox = mk('div', lgClip, 'a', 'width:1254px;height:1254px;transform-origin:0 0;visibility:hidden;mix-blend-mode:screen;-webkit-mask-image:url(assets/logo_mono.png);mask-image:url(assets/logo_mono.png);-webkit-mask-size:100% 100%;mask-size:100% 100%;overflow:hidden;');
+const sheen = mk('div', sheenBox, 'a', 'width:420px;height:2600px;background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.62) 50%,rgba(255,255,255,0) 100%);');
+const footLogo = mk('div', ov, 'a', 'width:1080px;height:1920px;clip-path:url(#cpLogo);visibility:hidden;');
+const footImg = mk('img', footLogo, 'a', 'width:1080px;height:1920px;');
+const lgLine = document.createElementNS(SVGNS, 'svg');
+lgLine.setAttribute('width', 1080); lgLine.setAttribute('height', 1920); lgLine.setAttribute('class', 'a');
+lgLine.style.cssText = 'overflow:visible;display:none;';
+lgLine.innerHTML = '<path fill="none" stroke="#C4CAD3" stroke-width="3" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>';
+ov.appendChild(lgLine);
+const lgLinePath = lgLine.firstChild;
+footImg.decoding = 'sync';
+const wmName = mk('img', shapeIn, 'a', 'visibility:hidden;'); wmName.src = 'assets/wordmark_name.png';
+const wmSub = mk('img', shapeIn, 'a', 'visibility:hidden;'); wmSub.src = 'assets/wordmark_sub.png';
+const latin = mk('div', shapeIn, 't', `font-size:29px;font-weight:500;color:${COL.silver};direction:ltr;`, 'MICHAEL BADALOV · ATTORNEY AT LAW');
+const LOGO_TALL = { x: 540, y: 742, s: 480 };
+const WM = { name: { y: 1089, w: 700, ar: 155 / 1158 }, sub: { y: 1187, w: 320, ar: 88 / 524 }, latinY: 1271 };
+// dive target: middle of the B stem (logo units)
+const DIVE_P = [349, 790];
+
+// ======================================================================
+// ACT 4 — services card with liquid tabs + footage (b22–b30)
+// ======================================================================
+const SV = { x: 540, y: 900, w: 940, h: 1062, r: 64, col: COL.white };
+const TABBAR = { x0: 94, x1: 986, y0: 393, y1: 499 };
+const SEGW = (TABBAR.x1 - TABBAR.x0) / 3;
+const SEG = [0, 1, 2].map(i => ({ x0: TABBAR.x1 - (i + 1) * SEGW, x1: TABBAR.x1 - i * SEGW }));
+const SV_MEDIA = { x: 540, y: 869, w: 892, h: 700, r: 40 };
+const tabBar = mk('div', shapeIn, 'a', `left:${TABBAR.x0}px;top:${TABBAR.y0}px;width:${TABBAR.x1 - TABBAR.x0}px;height:${TABBAR.y1 - TABBAR.y0}px;border-radius:53px;background:${COL.ink};visibility:hidden;`);
+const tabInd = mk('div', shapeIn, 'a', 'border-radius:45px;background:#fff;visibility:hidden;');
+const TABS = ['נזיקין', 'ביטוח לאומי', 'זכויות רפואיות'].map((s, i) => mk('div', shapeIn, 't', 'font-size:37px;font-weight:600;', s));
+const IND = { l: new Tr(SEG[0].x0 + 8), r: new Tr(SEG[0].x1 - 8) };
+const SERV = [
+  { t: b(23), title: 'נזיקין ותאונות דרכים', val: 'נלחמים על <span class="hl"><i></i><span class="hlw">כל שקל</span></span> שמגיע לכם.', hl: b(24) },
+  { t: b(26), title: 'ביטוח לאומי', val: '<span class="hl"><i></i><span class="hlw">ליווי אישי</span></span> עד הוועדה הרפואית.', hl: b(27) },
+  { t: b(29), title: 'זכויות רפואיות', val: 'פועלים למיצוי <span class="hl"><i></i><span class="hlw">כל הזכויות</span></span> שלכם.', hl: b(30) },
+];
+SERV.forEach((s, i) => {
+  s.tEl = mk('div', shapeIn, 't', `font-size:62px;font-weight:800;color:${COL.ink};letter-spacing:-.01em;`, s.title);
+  s.vEl = mk('div', shapeIn, 't', `font-size:41px;font-weight:500;color:${COL.mute};`, s.val);
+  s.mark = s.vEl.querySelector('.hl i');
+  s.end = i < 2 ? SERV[i + 1] && 0 : 0;
+});
+SERV[0].end = b(26); SERV[1].end = b(29); SERV[2].end = b(31);
+
+// ======================================================================
+// ACT 5 — "how it works" checklist (b31–b36)
+// ======================================================================
+const SP = { x: 540, y: 900, w: 940, h: 822, r: 64, col: COL.white };
+const SP_AV = { x: 902, y: 597, w: 120, h: 120, r: 60 };
+const spTitle = mk('div', shapeIn, 't', `font-size:54px;font-weight:800;color:${COL.ink};`, 'ככה זה עובד אצלנו');
+const spSub = mk('div', shapeIn, 't', `font-size:33px;font-weight:500;color:${COL.mute};`, 'עו״ד מיכאל בדלוב');
+const STEPS = ['פגישת ייעוץ ראשונית', 'מגיעים אליכם', 'בונים את התיק ביחד', 'ליווי אישי — עד הסוף'].map((s, i) => {
+  const row = { y: 762 + i * 130, tc: b(32 + i) };
+  row.box = mk('div', shapeIn, 'a', 'width:64px;height:64px;border-radius:50%;visibility:hidden;');
+  row.chk = icon(row.box, 'check', 36, '#fff', 'left:14px;top:15px;');
+  row.label = mk('div', shapeIn, 't', 'font-size:46px;font-weight:600;', s);
+  row.sep = i < 3 ? mk('div', shapeIn, 'a', `height:2px;background:${COL.line};visibility:hidden;`) : null;
+  return row;
+});
+const spBarBg = mk('div', shapeIn, 'a', `height:14px;border-radius:7px;background:#ECEBE7;visibility:hidden;`);
+const spBar = mk('div', shapeIn, 'a', `height:14px;border-radius:7px;background:${COL.navy};visibility:hidden;`);
+const spPct = ['0%', '25%', '50%', '75%', '100%'].map(s => mk('div', shapeIn, 't ltr', `font-size:32px;font-weight:700;color:${COL.ink};`, s));
+const PB = new Tr(0);
+const SP_BAR = { x0: 118, x1: 962, y: 1245 };
+
+// ======================================================================
+// ACT 6 — hero video player with scrubbing (b37–b42)
+// ======================================================================
+const HR = { x: 540, y: 900, w: 960, h: 1260, r: 64, col: COL.ink };
+const HR_MEDIA = { x: 540, y: 810, w: 920, h: 1040, r: 44 };
+const HR_TRACK = { x0: 170, x1: 900, y: 1402 };
+const hrTrack = mk('div', shapeIn, 'a', 'height:10px;border-radius:5px;background:rgba(255,255,255,.2);visibility:hidden;');
+const hrFill = mk('div', shapeIn, 'a', 'height:10px;border-radius:5px;background:#fff;visibility:hidden;');
+const hrKnob = mk('div', shapeIn, 'a', 'border-radius:50%;background:#fff;visibility:hidden;');
+const hrPause = icon(shapeIn, 'pause', 40, '#fff', 'visibility:hidden;');
+const hrTime = mk('div', shapeIn, 't ltr', 'font-size:30px;font-weight:500;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;', '0:00');
+const hrChip = mk('div', worldTop, 't', `font-size:37px;font-weight:600;color:${COL.ink};background:#fff;border-radius:40px;padding:20px 30px 20px 30px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>אנחנו איתכם — גם בוועדה.</span>');
+hrChip.insertBefore(icon(hrChip, 'pin', 36, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), hrChip.firstChild);
+const HERO = { t0: b(37), grab: b(39.5), rel: b(42), end: b(43), dur: 3.6 };
+const wayChip = mk('div', worldTop, 't', `font-size:40px;font-weight:600;color:${COL.ink};background:#fff;border-radius:44px;padding:22px 34px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>בדרך אליכם</span>');
+wayChip.insertBefore(icon(wayChip, 'pin', 38, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), wayChip.firstChild);
+
+// ======================================================================
+// ACT 7 — quote (b43–b47)
+// ======================================================================
+const QB = { x: 540, y: 1000, w: 900, h: 470, r: 60, col: COL.white };
+const Q_AV = { x: 540, y: 598, w: 280, h: 280, r: 140 };
+const qL1 = mk('div', shapeIn, 't', `font-size:60px;font-weight:800;color:${COL.ink};`, '״הלקוחות שלי');
+const qL2 = mk('div', shapeIn, 't', `font-size:60px;font-weight:800;color:${COL.ink};`, 'הם השותפים שלי.');
+const qL3 = mk('div', shapeIn, 't', `font-size:52px;font-weight:600;color:${COL.slate};`, 'ואני? השותף הקטן.״');
+const qSig = mk('div', shapeIn, 't', `font-size:34px;font-weight:500;color:${COL.mute};`, '— עו״ד מיכאל בדלוב');
+const avRing = mk('div', world, 'a', `border-radius:50%;border:5px solid ${COL.navy};visibility:hidden;`);
+
+// ======================================================================
+// ACT 8 — slide to call (b48–b51)
+// ======================================================================
+const CL = { x: 540, y: 1000, w: 920, h: 170, r: 85, col: COL.ink };
+const KNOB = { d: 138, x0: 1000 - 16 - 69, x1: 80 + 16 + 69, y: 1000 };
+const clTitle = mk('div', onCanvas, 't', `font-size:62px;font-weight:800;color:${COL.ink};`, 'רוצים לדבר עם מיכאל?');
+const clLabel = mk('div', shapeIn, 't', 'font-size:40px;font-weight:500;color:rgba(255,255,255,.78);', 'החליקו לשיחת ייעוץ');
+const clChev = [0, 1, 2].map(i => icon(shapeIn, 'chev', 40, '#fff', 'visibility:hidden;'));
+const clNum = mk('div', shapeIn, 't ltr', 'font-size:50px;font-weight:700;color:#fff;letter-spacing:.01em;', '050-3312607');
+const CALL = { grab: b(49), rel: b(51.25) };
+
+// ======================================================================
+// ACT 9 — CTA card (b52–b60) → back to the icon (b61–b63)
+// ======================================================================
+const CT = { x: 540, y: 900, w: 940, h: 940, r: 72, col: COL.navy };
+const logoEl = mk('img', shapeIn, 'a', 'visibility:hidden;transform-origin:50% 50%;'); logoEl.src = 'assets/logo_mono.png';
+const LG2 = { x: new Tr(540), y: new Tr(900), s: new Tr(210) };   // icon / CTA logo placement
+const iconLabel = mk('div', onCanvas, 't ltr', `font-size:31px;font-weight:600;color:${COL.mute};letter-spacing:.01em;`, 'bada.law');
+const ctName = mk('img', shapeIn, 'a', 'visibility:hidden;'); ctName.src = 'assets/wordmark_name.png';
+const ctSub = mk('img', shapeIn, 'a', 'visibility:hidden;'); ctSub.src = 'assets/wordmark_sub.png';
+const ctDiv = mk('div', shapeIn, 'a', 'height:2px;background:rgba(196,202,211,.35);visibility:hidden;transform-origin:50% 50%;');
+const ctLead = mk('div', shapeIn, 't', `font-size:44px;font-weight:500;color:${COL.silver};`, 'לייעוץ ראשוני');
+const ctNum = mk('div', shapeIn, 't ltr', 'font-size:112px;font-weight:800;color:#fff;letter-spacing:-.01em;display:flex;');
+const PHONE = '050-3312607';
+const odo = [...PHONE].map((ch, i) => {
+  if (!/\d/.test(ch)) { const s = mk('span', ctNum, '', 'display:inline-block;', ch); return { dash: s }; }
+  const box = mk('span', ctNum, 'odo');
+  const strip = mk('span', box, '', 'display:block;');
+  for (let k = 0; k < 20; k++) mk('span', strip, '', '', String(k % 10));
+  const d = +ch;
+  return { box, strip, d, tr: new Tr(d + 10).to(b(53) + i * .035, d, .62, .9).jump(b(62), d + 10) };
+});
+const CHIPS = ['נזיקין ותאונות דרכים', 'ביטוח לאומי', 'זכויות רפואיות'].map((s, i) =>
+  mk('div', shapeIn, 't', `font-size:30px;font-weight:500;color:#fff;display:flex;align-items:center;gap:12px;`, `<i style="display:inline-block;width:14px;height:14px;background:${COL.silver};flex:none"></i><span>${s}</span>`));
+const ctHandle = mk('div', shapeIn, 't ltr', 'font-size:40px;font-weight:600;color:#fff;background:rgba(255,255,255,.1);border-radius:44px;padding:18px 34px 18px 26px;display:flex;align-items:center;gap:12px;line-height:1;');
+icon(ctHandle, 'at', 36, COL.silver, 'position:relative;left:auto;top:auto;flex:none;');
+mk('span', ctHandle, '', '', 'bada.law');
+
+// ======================================================================
+// TIMELINE
+// ======================================================================
+const W = {}; // measured widths, filled in init()
+
+function buildTimeline() {
+  // --- ACT 1
+  click(b(0));
+  ev(b(0), 'whoosh');
+  QUEST.forEach((q, i) => {
+    const w = PILL.padL + W.q[i] + PILL.gap + PILL.disc + PILL.padR;
+    shapeTo(q.t, { x: 540, y: 900, w, h: PILL.h, r: PILL.r, col: COL.ink }, i ? .42 : .5, .84);
+    camTo(q.t, 540, 905, Math.min(1.5, 960 / w), i ? .55 : .75, .9);
+    if (i) ev(q.t, 'pop');
+  });
+  ev(b(1), 'tick'); ev(b(3), 'shake'); ev(b(5), 'flip');
+  curTo(b(0.35), 1350, 1450, .8, .9);
+
+  // --- ACT 2
+  shapeTo(b(6), ST, .6, .86); ev(b(6), 'whooshBig');
+  camTo(b(6), 540, 900, 1.0, .7, .9);
+  camTo(b(7), 540, 900, 1.025, .35, .82); ev(b(7), 'thud');
+  camTo(b(8), 540, 900, 1.075, .3, .78); ev(b(8), 'impact');
+  camTo(b(9), 540, 900, 1.05, .5, .9); ev(b(9), 'pop');
+  camTo(b(10), 540, 900, 1.035, .5, .9); ev(b(10), 'tick');
+  camTo(b(11), 540, 900, 1.0, .6, .9);
+
+  // --- ACT 3
+  shapeTo(b(11), LG_SQ, .55, .86); ev(b(11), 'whoosh');
+  PIECES.forEach(p => ev(p.t, 'clink', { i: PIECES.indexOf(p) }));
+  LS.to(b(14), 1.035, .18, .72).to(b(14) + .12, 1, .45, .82); ev(b(14), 'lock');
+  shapeTo(b(15), LG_TALL, .6, .88);
+  LP.x.to(b(15), LOGO_TALL.x, .6, .88); LP.y.to(b(15), LOGO_TALL.y, .6, .88); LP.s.to(b(15), LOGO_TALL.s, .6, .88);
+  ev(b(16), 'wipe'); ev(b(17), 'wipe2'); ev(b(18), 'tick');
+  shapeTo(b(19), LG_SQ, .6, .88);
+  LP.x.to(b(19), 540, .6, .88); LP.y.to(b(19), 900, .6, .88); LP.s.to(b(19), 660, .6, .88);
+  camTo(b(19), 540, 900, 1.06, .8, .9); ev(b(19), 'riser');
+  ev(b(20), 'dive');
+  // handoff at b21: camera identity, shape + media are the full frame
+  camJump(b(21), 540, 960, 1);
+  shapeJump(b(21), { x: 540, y: 960, w: 1080, h: 1920, r: 0, col: COL.white });
+  mediaJump(b(21), { x: 540, y: 960, w: 1080, h: 1920, r: 0, o: 1 });
+  // reset the logo placement while hidden
+  LP.x.jump(b(22), 540); LP.y.jump(b(22), 900); LP.s.jump(b(22), 600);
+
+  // --- ACT 4
+  shapeTo(b(22), SV, .62, .88); mediaTo(b(22), SV_MEDIA, .56, .9); ev(b(22), 'whooshBig');
+  curTo(b(21.6), 837, 446, .55, .9);
+  click(b(23)); ev(b(23), 'swish');
+  curTo(b(25.2), 540, 446, .5, .9); click(b(26)); ev(b(26), 'swish');
+  IND.l.to(b(26), SEG[1].x0 + 8, .28, .8); IND.r.to(b(26), SEG[1].x1 - 8, .5, .9);
+  curTo(b(28.2), 243, 446, .5, .9); click(b(29)); ev(b(29), 'swish');
+  IND.l.to(b(29), SEG[2].x0 + 8, .28, .8); IND.r.to(b(29), SEG[2].x1 - 8, .5, .9);
+  IND.l.jump(b(40), SEG[0].x0 + 8); IND.r.jump(b(40), SEG[0].x1 - 8);
+  ev(b(24), 'mark'); ev(b(27), 'mark'); ev(b(30), 'mark');
+
+  // --- ACT 5
+  shapeTo(b(31), SP, .56, .88); mediaTo(b(31), SP_AV, .56, .9); ev(b(31), 'whoosh');
+  camTo(b(31), 540, 915, 1.08, .7, .9);
+  curTo(b(31.1), 930, 762, .5, .9);
+  STEPS.forEach((row, i) => {
+    if (i) curTo(row.tc - .2, 930, row.y, .28, .9);
+    click(row.tc, 'check');
+    PB.to(row.tc + .02, (i + 1) / 4, .38, .92);
+  });
+  PB.jump(b(44), 0);
+  SC.to(b(36), 1.014, .18, .7).to(b(36) + .12, 1, .42, .85); ev(b(36), 'success');
+  curTo(b(36.2), 720, 1490, .6, .9);
+
+  // --- ACT 6
+  shapeTo(b(37), HR, .6, .88); mediaTo(b(37), HR_MEDIA, .6, .9); ev(b(37), 'whooshBig');
+  camTo(b(37), 540, 960, 1.0, .7, .9);
+  ev(b(38), 'pop');
+  const pGrab = (HERO.grab - HERO.t0) / HERO.dur;
+  curTo(b(38.7), HR_TRACK.x1 - pGrab * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .42, .92);
+  click(HERO.grab, 'grab');
+  curTo(HERO.grab + .08, HR_TRACK.x1 - .08 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .6, .92);
+  curTo(b(40.6), HR_TRACK.x1 - .965 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .62, .92);
+  ev(HERO.grab + .05, 'dragStart', { until: HERO.rel }); ev(HERO.rel, 'release');
+  curTo(b(42.2), 1250, 1760, .8, .9);
+
+  // --- ACT 7
+  shapeTo(b(43), QB, .56, .86); mediaTo(b(43), Q_AV, .58, .88); ev(b(43), 'whoosh');
+  camTo(b(43), 540, 900, 1.04, .8, .9);
+  ev(b(44), 'pop'); ev(b(45), 'pop2'); ev(b(46), 'tick'); ev(b(47), 'ring');
+
+  // --- ACT 8
+  shapeTo(b(48), CL, .5, .86); mediaTo(b(48), { x: KNOB.x0, y: KNOB.y, w: KNOB.d, h: KNOB.d, r: KNOB.d / 2 }, .52, .88); ev(b(48), 'whoosh');
+  camTo(b(48), 540, 960, 1.06, .7, .9);
+  curTo(b(47.9), KNOB.x0, KNOB.y, .5, .92);
+  click(CALL.grab, 'grab');
+  curTo(CALL.grab + .08, KNOB.x1, KNOB.y, .62, .92);
+  curTo(b(50.5), 55, KNOB.y + 4, .42, .9);
+  ev(CALL.grab + .05, 'dragStart', { until: CALL.rel }); ev(CALL.rel, 'connect');
+  SH.col.to(CALL.rel, COL.navy, .3, 1);
+  curTo(CALL.rel + .15, 760, 1340, .65, .9);
+
+  // --- ACT 9
+  shapeTo(b(52), CT, .62, .88); ev(b(52), 'whooshBig');
+  MD.x.jump(CALL.rel, KNOB.x1);   // the knob ends the drag at the far end
+  mediaTo(b(52), { x: CALLBTN.x, y: CALLBTN.y, w: CALLBTN.d, h: CALLBTN.d, r: CALLBTN.d / 2 }, .6, .88);
+  camTo(b(52), 540, 930, 1.04, .7, .9);
+  LG2.x.jump(b(50), 540); LG2.y.jump(b(50), CT_LAYOUT.logo); LG2.s.jump(b(50), CT_LAYOUT.logoS);
+  ev(b(53), 'roll'); ev(b(54), 'wipe'); ev(b(55), 'wipe2'); ev(b(56), 'pop'); ev(b(57), 'pop2');
+  curTo(b(57.1), CALLBTN.x - 6, CALLBTN.y + 8, .5, .92);
+  click(b(58)); ev(b(58), 'ripple'); ev(b(59), 'ripple');
+  curTo(b(58.4), 830, 1580, .75, .9);
+  ev(b(60), 'sheen');
+
+  // --- back to the icon (b61–b63) → loop
+  shapeTo(b(61), ICON, .62, .88); ev(b(61), 'whooshBig');
+  camTo(b(61), 540, 915, 1.7, .95, .92);
+  LG2.x.to(b(61), 540, .62, .88); LG2.y.to(b(61), 900, .62, .88); LG2.s.to(b(61), 210, .62, .88);
+  mediaTo(b(61), { x: 540, y: 900, w: 0, h: 0, r: 0, o: 0 }, .45, 1);
+  curTo(b(62.85), 560, 930, .5, .9);
+}
+
+// ======================================================================
+// init: fonts, measurements, timeline
+// ======================================================================
+let CALLBTN = { x: 880, y: 1040, d: 112 };
+async function init() {
+  await document.fonts.ready;
+  const LOGO_D = (await (await fetch('assets/logo_path_d.txt')).text()).trim();
+  $('cpLogoPath').setAttribute('d', LOGO_D); lgLinePath.setAttribute('d', LOGO_D);
+  await Promise.all([...document.images].map(im => im.decode().catch(() => {})));
+  const meas = mk('div', document.body, '', 'position:absolute;left:-5000px;top:0;visibility:hidden;font-family:Heebo;');
+  const m = (html, css) => { const e = mk('div', meas, 't', css + 'visibility:hidden;', html); const r = e.getBoundingClientRect(); return r.width; };
+  W.q = QUEST.map(q => m(q.text, 'font-size:47px;font-weight:600;'));
+  W.num = m(PHONE, 'font-size:112px;font-weight:800;letter-spacing:-.01em;direction:ltr;');
+  W.chips = CHIPS.map(c => m(c.innerHTML, 'font-size:30px;font-weight:500;display:flex;align-items:center;gap:12px;'));
+  meas.remove();
+  // CTA number + call button grouped and centered
+  const gap = 34, d = 112;
+  const groupW = W.num + gap + d;
+  CALLBTN = { x: 540 + groupW / 2 - d / 2, y: CT_LAYOUT.num, d };
+  W.numLeft = 540 - groupW / 2;
+  buildTimeline();
+  const bad = TRACKS.filter(tr => Math.abs(tr.last - tr.v0) > 1e-6);
+  if (bad.length) console.warn('open tracks', bad.length, bad.map(t => [t.v0, t.last]));
+}
+const CT_LAYOUT = { logo: 585, logoS: 230, name: 781, sub: 861, div: 918, lead: 968, num: 1062, chips: 1170, handle: 1250 };
+
+// ======================================================================
+// camera (with the dive override)
+// ======================================================================
+function camBase(t) { return { x: CAM.x.at(t), y: CAM.y.at(t), z: Math.exp(CAM.lz.at(t)) }; }
+function logoWorldPoint(t, u, v) { const x = LP.x.at(t), y = LP.y.at(t), s = LP.s.at(t); return [x + (u / 1254 - .5) * s, y + (v / 1254 - .5) * s]; }
+function camera(t) {
+  const t0 = b(20), t1 = b(21);
+  if (t >= t0 && t < t1) {
+    const c0 = camBase(t0);
+    const P = logoWorldPoint(t, DIVE_P[0], DIVE_P[1]);
+    const s0 = [(P[0] - c0.x) * c0.z + 540, (P[1] - c0.y) * c0.z + 960];
+    const u = (t - t0) / (t1 - t0);
+    const z = Math.exp(lerp(Math.log(c0.z), Math.log(46), Math.pow(u, 2.6)));
+    const e = eInOut3(c01(u * 1.25));
+    const s = [lerp(s0[0], 540, e), lerp(s0[1], 960, e)];
+    return { x: P[0] - (s[0] - 540) / z, y: P[1] - (s[1] - 960) / z, z };
+  }
+  return camBase(t);
+}
+const toScreen = (c, x, y) => [(x - c.x) * c.z + 540, (y - c.y) * c.z + 960];
+
+// ======================================================================
+// footage
+// ======================================================================
+const CLIPS = {
+  walk:     { n: 42, fps: 24, w: 1080, h: 1920 },
+  desk:     { n: 78, fps: 30, w: 720, h: 500 },
+  entrance: { n: 45, fps: 24, w: 720, h: 800 },
+  walkout:  { n: 87, fps: 24, w: 720, h: 800 },
+  talk2:    { n: 98, fps: 25, w: 720, h: 610 },
+  talk3:    { n: 73, fps: 25, w: 720, h: 610 },
+};
+const clipSrc = (c, i) => `assets/clips/${c}/f${String(i).padStart(3, '0')}.jpg`;
+// segments on the media element; framing: focus (fx, fy) and zoom track k
+const SEGS = [
+  { t0: b(19), t1: b(23), clip: 'walk', f0: 0, rate: .85, fx: .5, fy: .5, k: new Tr(1) },
+  { t0: b(23), t1: b(26), clip: 'desk', f0: 8, rate: 1, fx: .42, fy: .5, k: new Tr(1) },
+  { t0: b(26), t1: b(29), clip: 'entrance', f0: 0, rate: 1, fx: .5, fy: .4, k: new Tr(1) },
+  { t0: b(29), t1: b(37), clip: 'talk2', f0: 0, rate: .95, fx: .54, fy: .56, k: new Tr(1).to(b(31), 1.85, .56, .9).jump(b(40), 1) },
+  { t0: b(37), t1: b(43), clip: 'walkout', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1), scrub: true },
+  { t0: b(43), t1: b(52), clip: 'talk3', f0: 0, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
+];
+function heroP(t) {
+  const tc = CUR_AT(t);
+  const px = x => c01((HR_TRACK.x1 - x) / (HR_TRACK.x1 - HR_TRACK.x0));
+  if (t < HERO.grab) return c01((t - HERO.t0) / HERO.dur);
+  if (t < HERO.rel) return px(tc.x);
+  const pr = px(CUR_AT(HERO.rel).x);
+  return c01(pr + (t - HERO.rel) / HERO.dur);
+}
+function segFrame(seg, t) {
+  const c = CLIPS[seg.clip];
+  if (seg.scrub) return Math.round(heroP(t) * (c.n - 1));
+  let i = seg.f0 + Math.floor((t - seg.t0) * c.fps * seg.rate);
+  if (seg.mode === 'pingpong') { const p = 2 * (c.n - 1); i = ((i % p) + p) % p; if (i >= c.n) i = p - i; }
+  return clamp(i, 0, c.n - 1);
+}
+function segAt(t) { for (let i = 0; i < SEGS.length; i++) if (t >= SEGS[i].t0 && t < SEGS[i].t1) return i; return -1; }
+function frameImg(img, seg, t, w, h) {
+  const c = CLIPS[seg.clip];
+  const src = clipSrc(seg.clip, segFrame(seg, t));
+  if (img._src !== src) { img._src = src; img.src = src; }
+  const k = seg.k.at(t);
+  const s = Math.max(w / c.w, h / c.h) * k;
+  const dw = c.w * s, dh = c.h * s;
+  const left = clamp(w / 2 - seg.fx * dw, w - dw, 0), top = clamp(h / 2 - seg.fy * dh, h - dh, 0);
+  img.style.width = dw + 'px'; img.style.height = dh + 'px';
+  img.style.transform = `translate(${left.toFixed(2)}px,${top.toFixed(2)}px)`;
+}
+
+// ======================================================================
+// helpers for placing text
+// ======================================================================
+function place(el, x, y, V, o = {}) {
+  const v = V.v;
+  if (v < 0.003) { if (el._v !== 0) { el.style.visibility = 'hidden'; el._v = 0; } return false; }
+  if (el._v !== 1) { el.style.visibility = 'visible'; el._v = 1; }
+  const dy = (1 - v) * (V.s > 0 ? (o.dy ?? 22) : -(o.dyOut ?? 12));
+  const bl = (1 - v) * (o.blur ?? 12);
+  const sc = (o.sc ?? 1) * (o.scale ? 1 - (1 - v) * o.scale : 1);
+  const anchor = o.anchor ?? 'r';   // r = right edge (RTL), c = centre, l = left edge
+  const ax = anchor === 'r' ? '-100%' : anchor === 'c' ? '-50%' : '0%';
+  el.style.opacity = (o.op ?? 1) * v;
+  el.style.filter = bl > .06 ? `blur(${bl.toFixed(2)}px)` : 'none';
+  el.style.transform = `translate(${x.toFixed(2)}px,${(y + dy).toFixed(2)}px) translate(${ax},-50%) scale(${sc.toFixed(4)})`;
+  el.style.transformOrigin = anchor === 'r' ? '100% 50%' : anchor === 'c' ? '50% 50%' : '0% 50%';
+  return true;
+}
+function hide(el) { if (el._v !== 0) { el.style.visibility = 'hidden'; el._v = 0; } }
+function showEl(el) { if (el._v !== 1) { el.style.visibility = 'visible'; el._v = 1; } }
+function disp(el, on) { const v = on ? '' : 'none'; if (el._d !== v) { el.style.display = v; el._d = v; } }
+function box(el, x, y, w, h, r) { el.style.transform = `translate(${(x - w / 2).toFixed(2)}px,${(y - h / 2).toFixed(2)}px)`; el.style.width = w.toFixed(2) + 'px'; el.style.height = h.toFixed(2) + 'px'; if (r != null) el.style.borderRadius = r.toFixed(2) + 'px'; }
+
+let CUR_AT = t => ({ x: CUR.x.at(t), y: CUR.y.at(t) });
+
+// ======================================================================
+// seek(t): every style is a pure function of t
+// ======================================================================
+const pending = new Set();
+async function seek(tIn) {
+  const t = wrap(tIn);
+  const cam = camera(t);
+  world.style.transform = `translate(540px,960px) scale(${cam.z.toFixed(5)}) translate(${(-cam.x).toFixed(3)}px,${(-cam.y).toFixed(3)}px)`;
+
+  // ---------- shape ----------
+  let sx = SH.x.at(t), sy = SH.y.at(t), sw = Math.max(0, SH.w.at(t)), sh = Math.max(0, SH.h.at(t)), sr = Math.max(0, SH.r.at(t));
+  // rejection shake on b3
+  { const d = since(t, b(3)); if (d < .6) sx += 13 * Math.sin(2 * Math.PI * 8.5 * d) * Math.exp(-d / .11); }
+  let ssc = SC.at(t);
+  for (const tc of [b(0)]) ssc += pulse(t, tc, -.05);
+  const sLeft = sx - sw / 2, sTop = sy - sh / 2;
+  shape.style.width = sw.toFixed(2) + 'px'; shape.style.height = sh.toFixed(2) + 'px';
+  shape.style.transform = `translate(${sLeft.toFixed(2)}px,${sTop.toFixed(2)}px) scale(${ssc.toFixed(4)})`;
+  shape.style.borderRadius = Math.min(sr, sw / 2, sh / 2).toFixed(2) + 'px';
+  shape.style.background = SH.col.at(t);
+  shapeIn.style.transform = `translate(${(-sLeft).toFixed(2)}px,${(-sTop).toFixed(2)}px)`;
+  const xr = sx + sw / 2; // right edge of the shape (RTL anchor)
+
+  // ---------- ACT 1: pill ----------
+  {
+    const V = vis(t, b(0) + .04, b(6), .3, .16);
+    disp(pillDisc, V.v > 0);
+    if (V.v > 0) {
+      showEl(pillDisc);
+      const dx = xr - PILL.padR - PILL.disc / 2;
+      const s = .6 + .4 * V.v;
+      pillDisc.style.opacity = V.v;
+      pillDisc.style.transform = `translate(${(dx - PILL.disc / 2).toFixed(2)}px,${(900 - PILL.disc / 2).toFixed(2)}px) scale(${s.toFixed(4)})`;
+      QUEST.forEach((q, i) => {
+        const end = i < 2 ? QUEST[i + 1].t : b(6);
+        const Vi = vis(t, q.t + .06, end, .28, .12);
+        place(q.el, xr - PILL.padR - PILL.disc - PILL.gap, 900, Vi, { dy: 16, dyOut: 12, blur: 10 });
+        const Vc = vis(t, q.t + .02, end, .2, .1);
+        if (Vc.v > .003) {
+          q.ic.style.visibility = 'visible'; q.ic.style.opacity = Vc.v;
+          const d = since(t, q.t);
+          drawIcon(q.ic, (d - .04) / .36, q.icon === 'filex' ? 'path:not(.x)' : 'path,rect,circle');
+          let tr = '';
+          if (q.icon === 'car') { const k = since(t, b(1)); const a = k < 1 ? -9 * Math.exp(-k / .09) * Math.cos(2 * Math.PI * 4 * k) * (k > 0 ? 1 : 0) : 0; tr = `rotate(${a.toFixed(2)}deg) translateX(${(a * .5).toFixed(2)}px)`; }
+          if (q.icon === 'filex') drawIcon(q.ic, (since(t, b(3)) < 1.2 ? since(t, b(3)) : -1) / .22, 'path.x');
+          if (q.icon === 'hourglass') { const r = 180 * S(since(t, b(5)) < 1.2 ? since(t, b(5)) : 0, .42, .82); tr = `rotate(${r.toFixed(2)}deg)`; }
+          q.ic.style.transform = tr; q.ic.style.transformOrigin = '50% 50%';
+        } else q.ic.style.visibility = 'hidden';
+      });
+    } else { hide(pillDisc); QUEST.forEach(q => { hide(q.el); q.ic.style.visibility = 'hidden'; }); }
+  }
+
+  // ---------- ACT 2: statement ----------
+  {
+    const RX = 944;
+    const V1 = vis(t, b(6) + .08, b(11), .3, .14), V2 = vis(t, b(7), b(11) + .03, .28, .14);
+    if (V1.v > 0 || V2.v > 0) {
+      showEl(stL1);
+      stL1.style.transform = `translate(${RX}px,588px) translate(-100%,-50%)`;
+      [V1, V2].forEach((V, i) => {
+        const w = stW[i]; const v = V.v;
+        w.style.opacity = v;
+        w.style.filter = v < .99 ? `blur(${((1 - v) * 16).toFixed(2)}px)` : 'none';
+        w.style.transform = `translateY(${((1 - v) * (V.s > 0 ? 60 : -26)).toFixed(2)}px)`;
+      });
+    } else hide(stL1);
+    place(stL2, RX + 6, 850, vis(t, b(8), b(11) + .06, .22, .14), { dy: 90, dyOut: 30, blur: 22, scale: .06 });
+    if (place(stSub, RX, 1150, vis(t, b(9), b(11) + .09, .3, .14), { dy: 20, blur: 10 })) {
+      const u = inWin(t, b(10), b(11) + .5) ? eOut3(c01(since(t, b(10)) / .3)) : 0;
+      stSub.querySelector('.hl2 i').style.transform = `scaleX(${u.toFixed(4)})`;
+    }
+  }
+
+  // ---------- ACT 3: logo overlay ----------
+  const lx = LP.x.at(t), ly = LP.y.at(t), ls = LP.s.at(t) * LS.at(t);
+  const inLogo = inWin(t, b(10), b(21));
+  disp(lgClip, inLogo); disp(footLogo, inLogo && t >= b(19) && t < b(21)); disp(lgLine, inLogo && t >= b(19) && t < b(21));
+  if (inLogo) {
+    showEl(lgClip);
+    // clip the build to the card (screen space)
+    const [cx0, cy0] = toScreen(cam, sLeft, sTop), [cx1, cy1] = toScreen(cam, sx + sw / 2, sy + sh / 2);
+    const rr = Math.min(sr, sw / 2, sh / 2) * cam.z;
+    lgClip.style.clipPath = `inset(${cy0.toFixed(1)}px ${(1080 - cx1).toFixed(1)}px ${(1920 - cy1).toFixed(1)}px ${cx0.toFixed(1)}px round ${rr.toFixed(1)}px)`;
+    const [ox, oy] = toScreen(cam, lx - ls / 2, ly - ls / 2);
+    const k = ls * cam.z / 1254;
+    PIECES.forEach((p, i) => {
+      const V = vis(t, p.t, b(14), .14, .01);
+      if (V.v > .003 && t < b(14)) {
+        showEl(p.el);
+        p.el.style.opacity = V.v;
+        const dx = p.dx.at(t), dy = p.dy.at(t), rot = p.rot.at(t);
+        p.el.style.transform = `translate(${ox.toFixed(2)}px,${oy.toFixed(2)}px) scale(${k.toFixed(5)}) translate(${(dx + p.c[0]).toFixed(2)}px,${(dy + p.c[1]).toFixed(2)}px) rotate(${rot.toFixed(3)}deg) translate(${(-p.c[0]).toFixed(2)}px,${(-p.c[1]).toFixed(2)}px)`;
+        p.el.style.transformOrigin = '0 0';
+      } else hide(p.el);
+    });
+    const fullOn = t >= b(14) && t < b(21);
+    const footMix = c01((t - b(19)) / .3);
+    if (fullOn && footMix < 1) {
+      showEl(lgFull);
+      lgFull.style.opacity = 1 - footMix;
+      lgFull.style.transform = `translate(${ox.toFixed(2)}px,${oy.toFixed(2)}px) scale(${k.toFixed(5)})`;
+    } else hide(lgFull);
+    // sheen sweep after the lock
+    const sd = t - b(14.15);
+    if (sd > 0 && sd < 1.1 && footMix < 1) {
+      showEl(sheenBox);
+      sheenBox.style.transform = `translate(${ox.toFixed(2)}px,${oy.toFixed(2)}px) scale(${k.toFixed(5)})`;
+      const u = eInOut3(c01(sd / 1.0));
+      sheen.style.transform = `translate(${lerp(-700, 1600, u).toFixed(1)}px,-600px) rotate(24deg)`;
+    } else hide(sheenBox);
+    // footage inside the monogram, then the dive
+    if (t >= b(19) && t < b(21)) {
+      showEl(footLogo);
+      footLogo.style.opacity = footMix;
+      const a = k;
+      const e = ox, f = oy;
+      const M = `matrix(${(0.05 * a).toFixed(6)} 0 0 ${(-0.05 * a).toFixed(6)} ${e.toFixed(3)} ${(a * 1254 + f).toFixed(3)})`;
+      $('cpLogoPath').setAttribute('transform', M);
+      lgLinePath.setAttribute('transform', M);
+      lgLine.style.opacity = footMix * (1 - c01((t - b(20.55)) / .25));
+      const seg = SEGS[0];
+      const src = clipSrc(seg.clip, segFrame(seg, t));
+      if (footImg._src !== src) { footImg._src = src; footImg.src = src; pending.add(footImg); }
+    } else hide(footLogo);
+  }
+
+  // wordmark + latin line inside the logo card
+  {
+    const V = vis(t, b(16), b(19), .4, .16);
+    if (V.v > .003) {
+      showEl(wmName);
+      const w = WM.name.w, h = w * WM.name.ar;
+      const rev = eOut3(c01((t < b(19) ? t - b(16) : 1) / .42));
+      wmName.style.width = w + 'px'; wmName.style.height = h + 'px';
+      wmName.style.transform = `translate(${(540 - w / 2)}px,${(WM.name.y - h / 2 + (V.s < 0 ? -(1 - V.v) * 12 : 0)).toFixed(2)}px)`;
+      wmName.style.clipPath = `inset(-4px -4px -4px ${((1 - rev) * 100).toFixed(2)}%)`;
+      wmName.style.opacity = V.s < 0 ? V.v : 1;
+      wmName.style.filter = V.s < 0 ? `blur(${((1 - V.v) * 10).toFixed(2)}px)` : 'none';
+    } else hide(wmName);
+    const V2 = vis(t, b(17), b(19) + .03, .4, .16);
+    if (V2.v > .003) {
+      showEl(wmSub);
+      const w = WM.sub.w, h = w * WM.sub.ar;
+      const rev = eOut3(c01((t < b(19) ? t - b(17) : 1) / .38));
+      wmSub.style.width = w + 'px'; wmSub.style.height = h + 'px';
+      wmSub.style.transform = `translate(${(540 - w / 2)}px,${(WM.sub.y - h / 2 + (V2.s < 0 ? -(1 - V2.v) * 12 : 0)).toFixed(2)}px)`;
+      wmSub.style.clipPath = `inset(-4px -4px -4px ${((1 - rev) * 100).toFixed(2)}%)`;
+      wmSub.style.opacity = V2.s < 0 ? V2.v : 1;
+      wmSub.style.filter = V2.s < 0 ? `blur(${((1 - V2.v) * 10).toFixed(2)}px)` : 'none';
+    } else hide(wmSub);
+    const V3 = vis(t, b(18), b(19) + .06, .5, .16);
+    if (place(latin, 540, WM.latinY, V3, { anchor: 'c', dy: 10, blur: 8 })) {
+      const ls = V3.s > 0 ? lerp(.5, .24, eOut3(c01((t - b(18)) / .6))) : .24;
+      latin.style.letterSpacing = ls.toFixed(3) + 'em';
+    }
+  }
+
+  // ---------- ACT 4: services ----------
+  {
+    const Vb = vis(t, b(22) + .16, b(31), .32, .14);
+    if (Vb.v > .003) {
+      showEl(tabBar); tabBar.style.opacity = Vb.v;
+      tabBar.style.transform = `translateY(${((1 - Vb.v) * -14).toFixed(2)}px) scale(${(.96 + .04 * Vb.v).toFixed(4)})`;
+    } else hide(tabBar);
+    const Vi = vis(t, b(23), b(31), .2, .14);
+    if (Vi.v > .003) {
+      showEl(tabInd);
+      const l = IND.l.at(t), r = IND.r.at(t);
+      const grow = S(since(t, b(23)) < 2 ? since(t, b(23)) : 5, .36, .8);
+      const cx = (l + r) / 2, w = (r - l) * (.55 + .45 * grow);
+      tabInd.style.opacity = Vi.v;
+      box(tabInd, cx, (TABBAR.y0 + TABBAR.y1) / 2, w, TABBAR.y1 - TABBAR.y0 - 16, 45);
+    } else hide(tabInd);
+    TABS.forEach((el, i) => {
+      const seg = SEG[i];
+      const selT = SERV[i].t, deselT = SERV[i].end;
+      const sel = inWin(t, selT - .02, deselT) ? c01(since(t, selT - .02) / .14) : (inWin(t, deselT, deselT + .5) ? 1 - c01(since(t, deselT) / .14) : 0);
+      const col = sel > 0 ? `rgb(${lerp(255, 11, sel)},${lerp(255, 13, sel)},${lerp(255, 17, sel)})` : '#fff';
+      el.style.color = col;
+      place(el, (seg.x0 + seg.x1) / 2, (TABBAR.y0 + TABBAR.y1) / 2, Vb, { anchor: 'c', dy: -10, blur: 8, op: .62 + .38 * sel });
+    });
+    SERV.forEach((s, i) => {
+      const V = vis(t, s.t + .05, s.end, .3, .13);
+      place(s.tEl, 976, 1283, V, { dy: 18, blur: 10 });
+      const V2 = vis(t, s.t + .11, s.end + .02, .3, .13);
+      if (place(s.vEl, 976, 1352, V2, { dy: 18, blur: 10 })) {
+        const p = inWin(t, s.hl, s.end + .2) ? eOut3(c01(since(t, s.hl) / .32)) : 0;
+        s.mark.style.transform = `scaleX(${p.toFixed(4)})`;
+        s.vEl.querySelector('.hlw').style.color = p > 0 ? `rgb(${lerp(107, 11, p)},${lerp(116, 13, p)},${lerp(128, 17, p)})` : '';
+      }
+    });
+  }
+
+  // ---------- ACT 5: steps ----------
+  {
+    const V = vis(t, b(31) + .12, b(37), .3, .14);
+    place(spTitle, 814, 574, V, { dy: 16 });
+    place(spSub, 814, 630, vis(t, b(31) + .17, b(37), .3, .14), { dy: 16 });
+    STEPS.forEach((row, i) => {
+      const Vr = vis(t, b(31) + .2 + i * .05, b(37) + i * .015, .32, .14);
+      const done = inWin(t, row.tc, b(37) + .5) ? c01(since(t, row.tc) / .12) : 0;
+      if (Vr.v > .003) {
+        showEl(row.box);
+        const pop = 1 + pulse(t, row.tc, -.14, .12, .3);
+        const bg = done > 0 ? `rgb(${lerp(255, 11, done)},${lerp(255, 13, done)},${lerp(255, 17, done)})` : '#fff';
+        row.box.style.background = bg;
+        row.box.style.border = `3px solid rgb(${lerp(200, 11, done)},${lerp(199, 13, done)},${lerp(194, 17, done)})`;
+        row.box.style.opacity = Vr.v;
+        row.box.style.filter = Vr.v < .99 ? `blur(${((1 - Vr.v) * 8).toFixed(2)}px)` : 'none';
+        row.box.style.transform = `translate(${930 - 32}px,${(row.y - 32 + (1 - Vr.v) * 16).toFixed(2)}px) scale(${pop.toFixed(4)})`;
+        drawIcon(row.chk, inWin(t, row.tc, b(37) + .5) ? (since(t, row.tc) - .03) / .2 : 0);
+        row.label.style.color = `rgb(${lerp(140, 11, done)},${lerp(144, 13, done)},${lerp(152, 17, done)})`;
+      } else hide(row.box);
+      place(row.label, 870, row.y, Vr, { dy: 16, blur: 8 });
+      if (row.sep) {
+        if (Vr.v > .003) { showEl(row.sep); row.sep.style.opacity = Vr.v; box(row.sep, (118 + 870) / 2 + 46, row.y + 65, 962 - 118, 2); } else hide(row.sep);
+      }
+    });
+    const Vb = vis(t, b(31) + .4, b(37) + .06, .3, .14);
+    if (Vb.v > .003) {
+      showEl(spBarBg); showEl(spBar);
+      spBarBg.style.opacity = Vb.v; spBar.style.opacity = Vb.v;
+      box(spBarBg, (SP_BAR.x0 + SP_BAR.x1) / 2, SP_BAR.y, SP_BAR.x1 - SP_BAR.x0, 14, 7);
+      const p = c01(PB.at(t)); const w = (SP_BAR.x1 - SP_BAR.x0) * p;
+      box(spBar, SP_BAR.x1 - w / 2, SP_BAR.y, Math.max(w, 0.001), 14, 7);
+    } else { hide(spBarBg); hide(spBar); }
+    spPct.forEach((el, i) => {
+      const a = i === 0 ? b(31) + .45 : STEPS[i - 1].tc + .02, z = i < 4 ? STEPS[i].tc + .02 : b(37) + .06;
+      place(el, SP_BAR.x0, SP_BAR.y - 44, vis(t, a, z, .2, .08), { anchor: 'l', dy: 14, dyOut: 14, blur: 6 });
+    });
+  }
+
+  // ---------- ACT 6: hero ----------
+  {
+    const Vc = vis(t, b(37) + .3, b(43), .32, .14);
+    if (Vc.v > .003) {
+      [hrTrack, hrFill, hrKnob].forEach(showEl);
+      const p = heroP(t);
+      const x0 = HR_TRACK.x0, x1 = HR_TRACK.x1, y = HR_TRACK.y;
+      hrTrack.style.opacity = hrFill.style.opacity = hrKnob.style.opacity = Vc.v;
+      box(hrTrack, (x0 + x1) / 2, y, x1 - x0, 10, 5);
+      const kx = x1 - p * (x1 - x0);
+      box(hrFill, (kx + x1) / 2, y, Math.max(x1 - kx, .001), 10, 5);
+      const held = inWin(t, HERO.grab, HERO.rel);
+      const gs = held ? 1 + .55 * S(t - HERO.grab, .25, .8) : 1 + .55 * (1 - S(since(t, HERO.rel), .3, .85)) * (inWin(t, HERO.rel, HERO.rel + 2) ? 1 : 0);
+      box(hrKnob, kx, y, 30 * gs, 30 * gs, 15 * gs);
+      hrPause.style.visibility = 'visible'; hrPause.style.opacity = Vc.v;
+      hrPause.style.transform = `translate(${(956 - 20)}px,${(y - 20)}px)`;
+      const secs = 14 + p * 3.6 * 1.0;
+      hrTime.textContent = `0:${String(Math.floor(secs)).padStart(2, '0')}`;
+      place(hrTime, 118, y, Vc, { anchor: 'l', dy: 12, blur: 6 });
+    } else { [hrTrack, hrFill, hrKnob].forEach(hide); hrPause.style.visibility = 'hidden'; hide(hrTime); }
+    place(hrChip, 540 + 920 / 2 - 28, 810 + 1040 / 2 - 64, vis(t, b(38), b(43), .34, .14), { dy: 16, blur: 10, scale: .08 });
+  }
+
+  // ---------- ACT 7: quote ----------
+  {
+    place(qL1, 540, 868, vis(t, b(44), b(48), .3, .14), { anchor: 'c', dy: 20 });
+    place(qL2, 540, 943, vis(t, b(44) + .1, b(48) + .02, .3, .14), { anchor: 'c', dy: 20 });
+    place(qL3, 540, 1044, vis(t, b(45), b(48) + .04, .3, .14), { anchor: 'c', dy: 20 });
+    place(qSig, 540, 1140, vis(t, b(46), b(48) + .06, .3, .14), { anchor: 'c', dy: 14 });
+    const d = since(t, b(47));
+    const V = vis(t, b(47), b(48), .01, .14);
+    if (V.v > .003) {
+      showEl(avRing);
+      const p = eOut3(c01(d / .5));
+      const sz = Q_AV.w + 26 + 40 * p;
+      avRing.style.opacity = (1 - p) * V.v;
+      box(avRing, Q_AV.x, Q_AV.y, sz, sz, sz / 2);
+    } else hide(avRing);
+  }
+
+  // ---------- ACT 8: call ----------
+  {
+    place(clTitle, 540, 846, vis(t, b(48) + .12, b(52), .32, .14), { anchor: 'c', dy: 20 });
+    const Vl = vis(t, b(48) + .16, CALL.grab + .75, .3, .3);
+    place(clLabel, 500, 1000, Vl, { anchor: 'c', dy: 12, blur: 8 });
+    clChev.forEach((c, i) => {
+      if (Vl.v > .003) {
+        c.style.visibility = 'visible';
+        const ph = ((t - b(48)) * 2 - i * .18) % 1;
+        const a = .25 + .75 * Math.pow(Math.max(0, Math.sin(Math.PI * c01(ph))), 2);
+        c.style.opacity = Vl.v * a;
+        c.style.transform = `translate(${270 - i * 26 - 20}px,${1000 - 20}px)`;
+      } else c.style.visibility = 'hidden';
+    });
+    place(clNum, 520, 1000, vis(t, CALL.rel + .08, b(52), .3, .14), { anchor: 'c', dy: 14 });
+  }
+
+  // ---------- ACT 9: CTA ----------
+  place(iconLabel, 540, 1086, vis(t, b(61.6), T, .4, .12), { anchor: 'c', dy: 12, blur: 8 });
+  {
+    const L = CT_LAYOUT;
+    // logo (CTA + icon): enters at b52, stays through the loop point, exits as the pill forms
+    const Vg = vis(t, b(52) + .1, T, .34, .16);
+    if (Vg.v > .003) {
+      showEl(logoEl);
+      const x = LG2.x.at(t), y = LG2.y.at(t), s = LG2.s.at(t);
+      const bl = (1 - Vg.v) * 10;
+      logoEl.style.opacity = Vg.v; logoEl.style.filter = bl > .05 ? `blur(${bl.toFixed(2)}px)` : 'none';
+      logoEl.style.width = s + 'px'; logoEl.style.height = s + 'px';
+      logoEl.style.transform = `translate(${(x - s / 2).toFixed(2)}px,${(y - s / 2).toFixed(2)}px) scale(${(.9 + .1 * Vg.v).toFixed(4)})`;
+    } else hide(logoEl);
+    const img = (el, y, w, ar, a, z) => {
+      const V = vis(t, a, z, .4, .14);
+      if (V.v < .003) return hide(el);
+      showEl(el); const h = w * ar;
+      const rev = V.s > 0 ? eOut3(c01(since(t, a) / .42)) : 1;
+      el.style.width = w + 'px'; el.style.height = h + 'px';
+      el.style.transform = `translate(${540 - w / 2}px,${(y - h / 2 - (V.s < 0 ? (1 - V.v) * 10 : 0)).toFixed(2)}px)`;
+      el.style.clipPath = `inset(-4px -4px -4px ${((1 - rev) * 100).toFixed(2)}%)`;
+      el.style.opacity = V.s < 0 ? V.v : 1;
+      el.style.filter = V.s < 0 && V.v < .99 ? `blur(${((1 - V.v) * 10).toFixed(2)}px)` : 'none';
+    };
+    img(ctName, L.name, 620, 155 / 1158, b(54), b(61));
+    img(ctSub, L.sub, 290, 88 / 524, b(55), b(61) + .02);
+    const Vd = vis(t, b(55), b(61) + .03, .5, .14);
+    if (Vd.v > .003) { showEl(ctDiv); ctDiv.style.opacity = Vd.v; box(ctDiv, 540, L.div, 680 * (Vd.s > 0 ? eOut3(Vd.v) : 1), 2); } else hide(ctDiv);
+    place(ctLead, 540, L.lead, vis(t, b(52) + .18, b(61) + .02, .3, .14), { anchor: 'c', dy: 16 });
+    const Vn = vis(t, b(53), b(61) + .04, .2, .14);
+    if (place(ctNum, W.numLeft ?? 100, L.num, Vn, { anchor: 'l', dy: 0, blur: 0 })) {
+      odo.forEach(o => { if (o.strip) { const pos = o.tr.at(t); o.strip.style.transform = `translateY(${(-pos).toFixed(4)}em)`; } });
+    }
+    CHIPS.forEach((c, i) => { const V = vis(t, b(56) + i * .06, b(61) + .05, .3, .14); c._V = V; });
+    { const gap = 34; const tot = W.chips.reduce((a, c) => a + c, 0) + gap * 2; let x = 540 + tot / 2;
+      CHIPS.forEach((c, i) => { place(c, x, L.chips, c._V, { dy: 14 }); x -= W.chips[i] + gap; }); }
+    place(ctHandle, 540, L.handle, vis(t, b(57), b(61) + .06, .32, .14), { anchor: 'c', dy: 18, scale: .06 });
+    // ripple from the call button
+    const dR = since(t, inWin(t, b(59), b(61)) ? b(59) : b(58));
+    if (dR < .75 && inWin(t, b(58), b(61))) {
+      showEl(mRing); const p = eOut3(dR / .75); const sz = CALLBTN.d + 150 * p;
+      mRing.style.opacity = (1 - p) * .9; box(mRing, CALLBTN.x, CALLBTN.y, sz, sz, sz / 2);
+    } else hide(mRing);
+  }
+
+  // ---------- media element ----------
+  {
+    let mx = MD.x.at(t), my = MD.y.at(t), mw = Math.max(0, MD.w.at(t)), mh = Math.max(0, MD.h.at(t)), mr = Math.max(0, MD.r.at(t));
+    const mo = c01(MD.o.at(t));
+    let g = 1;
+    if (t >= CALL.grab && t < b(52)) {
+      // slide-to-call knob: direct manipulation while held, springs back from wherever it was on release
+      const d = KNOB.d;
+      const rub = o => (1 - 1 / (o * .55 / 120 + 1)) * 120;
+      let kx, st = 0;
+      if (t < CALL.rel) {
+        const cx = Math.min(KNOB.x0, CUR_AT(t).x);
+        if (cx >= KNOB.x1) kx = cx; else { st = rub(KNOB.x1 - cx); kx = KNOB.x1 - st / 2; }
+        g = 1 + .08 * S(t - CALL.grab, .22, .8);
+      } else {
+        const st0 = rub(Math.max(0, KNOB.x1 - CUR_AT(CALL.rel).x));
+        st = st0 * (1 - S(t - CALL.rel, .32, .78)); kx = KNOB.x1 - st / 2;
+        g = 1 + .08 * (1 - S(t - CALL.rel, .3, .85));
+      }
+      mx = kx; my = KNOB.y; mw = d + st; mh = d; mr = d / 2;
+    }
+    const pressB = pulse(t, b(58), -.08);
+    const on = mo > .003 && mw > 1 && mh > 1 && t >= b(21);
+    disp(media, on);
+    if (!on) hide(wayChip);
+    if (on) {
+      media.style.opacity = mo;
+      media.style.width = mw.toFixed(2) + 'px'; media.style.height = mh.toFixed(2) + 'px';
+      media.style.borderRadius = Math.min(mr, mw / 2, mh / 2).toFixed(2) + 'px';
+      media.style.transform = `translate(${(mx - mw / 2).toFixed(2)}px,${(my - mh / 2).toFixed(2)}px) scale(${(g * (1 + pressB)).toFixed(4)})`;
+      const si = segAt(t);
+      // bottom layer = previous clip while the new one blurs in on top
+      let bottom = null, top = null, a = 1;
+      if (si >= 0) {
+        const seg = SEGS[si];
+        a = c01((t - seg.t0) / .2);
+        if (si > 0 && a < 1) { bottom = SEGS[si - 1]; top = seg; } else bottom = seg;
+      }
+      [[mImg[0], bottom, 1], [mImg[1], top, a]].forEach(([im, seg, al]) => {
+        if (!seg) { hide(im); return; }
+        showEl(im);
+        frameImg(im, seg, t, mw, mh);
+        pending.add(im);
+        im.style.opacity = al;
+        im.style.filter = al < 1 ? `blur(${((1 - al) * 14).toFixed(2)}px)` : 'none';
+      });
+      place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(21) + .1, b(23), .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
+      const Vi = vis(t, CALL.rel, b(61), .22, .14);
+      if (Vi.v > .003) { showEl(mIcon); mIcon.style.opacity = Vi.v; mIconSvg.style.transform = `translate(-50%,-50%) scale(${(.6 + .4 * Vi.v).toFixed(4)})`; } else hide(mIcon);
+    }
+  }
+
+  // ---------- cursor ----------
+  {
+    const c = CUR_AT(t);
+    const [x, y] = toScreen(cam, c.x, c.y);
+    let pr = 0;
+    for (const tc of CLICKS) if (tc !== HERO.grab && tc !== CALL.grab) pr += pulse(t, tc, -.14);
+    for (const [g0, g1] of [[HERO.grab, HERO.rel], [CALL.grab, CALL.rel]]) {
+      if (t >= g0 - .1 && t < g1) pr += -.13 * S(t - (g0 - .07), .16, .9);
+      else if (t >= g1 && t < g1 + 1.5) pr += -.13 * (1 - S(t - g1, .3, .85));
+    }
+    const s = 1.4 * Math.pow(cam.z, .32) * (1 + pr);
+    cursorEl.style.transform = `translate(${x.toFixed(2)}px,${y.toFixed(2)}px) scale(${s.toFixed(4)})`;
+    cursorEl.style.visibility = (x > -120 && x < 1200 && y > -120 && y < 2050) ? 'visible' : 'hidden';
+  }
+
+  // wait for every image this frame uses
+  const ps = [...pending].map(im => (im.complete && im.naturalWidth) ? im.decode().catch(() => {}) : new Promise(r => { im.onload = im.onerror = () => r(); }).then(() => im.decode().catch(() => {})));
+  pending.clear();
+  await Promise.all(ps);
+}
+
+window.REEL = { T, BPM, NB, BEAT, EVENTS, seek, ready: init().then(() => true) };
+})();
+</script>
+</body>
+</html>
