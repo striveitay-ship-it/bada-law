@@ -789,11 +789,8 @@ def wav(path, x):
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(y.tobytes())
 
 
-def main():
-    ev_path, outdir = sys.argv[1], sys.argv[2]
-    data = json.load(open(ev_path))
-    events, curves = data['events'], data['curves']
-    assert abs(data['T'] - T) < 1e-6 and data['BPM'] == BPM, 'timeline and score disagree'
+def score_music():
+    """the synthesized score, mixed and EQ'd for phone speakers (LOOPS + 1 passes)"""
     B, kicks = compose()
     duck_bass = sidechain(N, kicks, depth=.6, rel=.14)[:, None]      # the bass breathes around the kick
     duck_mus = sidechain(N, kicks, depth=.25, rel=.16)[:, None]
@@ -805,7 +802,13 @@ def main():
     music = music - lp(music, 95, 2) * .4             # phones can't play the deep sub anyway
     music = music + bp(music, 180, 520, 1) * .12      # a little body in the low mids
     music = music + hp(music, 3500, 2) * .45          # presence for phone speakers, without edge
+    return music
 
+
+def finish(music, events, curves, outdir):
+    """scrub the soundtrack with the player, add the UI sounds, master and write the stems.
+    `music` covers LOOPS + 1 passes; the middle pass is kept so the loop point is seamless."""
+    music = music.copy()
     # the player scrub: the soundtrack is dragged with the video (it rewinds, then fast-forwards)
     sc = curves['scrub']
     pv = np.array(sc['v'])
@@ -853,6 +856,18 @@ def main():
         for p in placed:
             fh.write(f'  {p[0]:7.3f}  {p[1]:<10} peak@{p[2]} ms\n')
     print(open(f'{outdir}/beatgrid.txt').read()[:300])
+
+
+def load_events(path):
+    data = json.load(open(path))
+    assert abs(data['T'] - T) < 1e-6 and data['BPM'] == BPM, 'timeline and score disagree'
+    return data['events'], data['curves']
+
+
+def main():
+    ev_path, outdir = sys.argv[1], sys.argv[2]
+    events, curves = load_events(ev_path)
+    finish(score_music(), events, curves, outdir)
 
 
 if __name__ == '__main__':

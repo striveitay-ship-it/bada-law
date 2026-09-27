@@ -3,9 +3,10 @@
 #   out/bada-law-reel.mp4            60 fps, H.264 Main@4.2 - the smooth one (music + UI sounds, -14 LUFS)
 #   out/bada-law-reel-30fps.mp4      30 fps, H.264 Main@4.0 - fallback for players that refuse 60 fps
 #   out/bada-law-reel-sfx-only.mp4   60 fps, UI sounds only (to add a track inside Instagram)
+# Another soundtrack: AUDIO=<dir with mix.wav> NAME=<file name> tools/mux.sh ...  (no SFX-only cut)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-V="$1"; WORK="${2:-$(dirname "$1")}"
+V="$1"; WORK="${2:-$(dirname "$1")}"; AUD="${AUDIO:-out}"; NAME="${NAME:-bada-law-reel}"
 COLOR="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
 # video, encoded once per frame rate (kept when the encodes are newer than the master, e.g. a new soundtrack only)
 if [ ! -s "$WORK/v30.mp4" ] || [ "$V" -nt "$WORK/v30.mp4" ]; then
@@ -23,10 +24,12 @@ aac() { # wav, target LUFS, out
   echo "$(basename "$1"): $I LUFS -> gain ${G} dB"
   ffmpeg -v error -y -i "$1" -af "volume=${G}dB,alimiter=limit=0.89:attack=1:release=60:level=disabled" -c:a aac -b:a 192k -ar 48000 "$3"
 }
-aac out/mix.wav -14 "$WORK/mix.m4a"
-aac out/sfx.wav -21 "$WORK/sfx.m4a"
 mux() { ffmpeg -v error -y -i "$1" -i "$2" -map 0:v -map 1:a -c copy -shortest -movflags +faststart "$3"; }
-mux "$WORK/v60.mp4" "$WORK/mix.m4a" out/bada-law-reel.mp4
-mux "$WORK/v30.mp4" "$WORK/mix.m4a" out/bada-law-reel-30fps.mp4
-mux "$WORK/v60.mp4" "$WORK/sfx.m4a" out/bada-law-reel-sfx-only.mp4
+aac "$AUD/mix.wav" -14 "$WORK/$NAME-mix.m4a"
+mux "$WORK/v60.mp4" "$WORK/$NAME-mix.m4a" "out/$NAME.mp4"
+mux "$WORK/v30.mp4" "$WORK/$NAME-mix.m4a" "out/$NAME-30fps.mp4"
+if [ "$NAME" = bada-law-reel ]; then
+  aac out/sfx.wav -21 "$WORK/sfx.m4a"
+  mux "$WORK/v60.mp4" "$WORK/sfx.m4a" out/bada-law-reel-sfx-only.mp4
+fi
 ls -la out/*.mp4

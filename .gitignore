@@ -4,3 +4,4 @@ reel/out/work/
 *.mkv
 *.parts/
 __pycache__/
+reel/out/trap/sfx.wav
