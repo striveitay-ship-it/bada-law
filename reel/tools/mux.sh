@@ -7,11 +7,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 V="$1"; WORK="${2:-$(dirname "$1")}"
 COLOR="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
-# video, encoded once per frame rate
+# video, encoded once per frame rate (kept when the encodes are newer than the master, e.g. a new soundtrack only)
+if [ ! -s "$WORK/v30.mp4" ] || [ "$V" -nt "$WORK/v30.mp4" ]; then
 ffmpeg -v error -y -i "$V" -vf "tmix=frames=2:weights='1 1',select='eq(mod(n\,2)\,1)',setpts=N/30/TB,format=yuv420p" -r 30 \
   -c:v libx264 -preset slow -crf 17 -profile:v main -level 4.0 -pix_fmt yuv420p $COLOR -an "$WORK/v30.mp4"
+fi
+if [ ! -s "$WORK/v60.mp4" ] || [ "$V" -nt "$WORK/v60.mp4" ]; then
 ffmpeg -v error -y -i "$V" -vf "format=yuv420p" -r 60 \
   -c:v libx264 -preset slow -crf 16 -profile:v main -level 4.2 -pix_fmt yuv420p $COLOR -an "$WORK/v60.mp4"
+fi
 # audio: linear gain to the loudness target (no dynamic processing), AAC
 lufs() { ffmpeg -hide_banner -nostats -i "$1" -af ebur128 -f null - 2>&1 | awk '/I:/{v=$2} END{print v}'; }
 aac() { # wav, target LUFS, out

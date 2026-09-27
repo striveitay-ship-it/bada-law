@@ -1,23 +1,23 @@
-measured tempo 119.99 BPM, first beat phase 5.0 ms (0 = starts on a downbeat)
-loudness estimate -13.5 LUFS, peak -5.51 dBFS
+measured tempo 119.99 BPM, first beat phase 3.0 ms (0 = starts on a downbeat)
+loudness estimate -13.5 LUFS, peak -4.69 dBFS
 UI sounds (event time s, type, peak offset ms):
     0.000  click      peak@2.3 ms
     0.000  whoosh     peak@310.0 ms
-    1.000  pop        peak@3.0 ms
+    1.000  pop        peak@2.7 ms
     1.500  xdraw      peak@110.0 ms
-    2.000  pop        peak@3.1 ms
-    2.500  flip       peak@172.7 ms
+    2.000  pop        peak@2.2 ms
+    2.500  flip       peak@123.1 ms
     3.000  whooshBig  peak@450.0 ms
     3.500  thud       peak@10.8 ms
-    4.500  pop        peak@3.0 ms
+    4.500  pop        peak@2.3 ms
     5.000  tick       peak@2.0 ms
     5.500  swell      peak@0.0 ms
     6.000  whoosh     peak@310.0 ms
-    6.000  clink      peak@3.0 ms
-    6.000  clink      peak@10.1 ms
-    6.500  clink      peak@3.4 ms
-    7.000  clink      peak@2.7 ms
-    7.500  lock       peak@45.3 ms
+    6.000  clink      peak@17.3 ms
+    6.000  clink      peak@19.2 ms
+    6.500  clink      peak@5.4 ms
+    7.000  clink      peak@2.8 ms
+    7.500  lock       peak@49.4 ms
     8.000  wipe       peak@250.0 ms
     8.500  wipe2      peak@210.0 ms
     9.000  tick       peak@2.0 ms
@@ -25,39 +25,39 @@ UI sounds (event time s, type, peak offset ms):
    11.000  dive       peak@1100.0 ms
    13.000  whooshBig  peak@450.0 ms
    13.500  click      peak@2.3 ms
-   13.500  swish      peak@3.2 ms
+   13.500  swish      peak@2.7 ms
    14.000  mark       peak@140.0 ms
    15.500  click      peak@2.3 ms
    15.500  swish      peak@2.2 ms
    16.000  mark       peak@140.0 ms
    17.500  click      peak@2.3 ms
-   17.500  swish      peak@3.2 ms
+   17.500  swish      peak@2.2 ms
    18.000  mark       peak@140.0 ms
    19.500  whoosh     peak@310.0 ms
-   20.000  check      peak@3.2 ms
-   20.500  check      peak@3.2 ms
-   21.000  check      peak@3.2 ms
-   21.500  check      peak@3.0 ms
-   22.000  success    peak@144.7 ms
+   20.000  check      peak@2.9 ms
+   20.500  check      peak@2.2 ms
+   21.000  check      peak@2.2 ms
+   21.500  check      peak@2.2 ms
+   22.000  success    peak@24.5 ms
    22.500  whooshBig  peak@450.0 ms
-   23.000  pop        peak@3.0 ms
-   23.500  grab       peak@3.0 ms
+   23.000  pop        peak@2.2 ms
+   23.500  grab       peak@3.1 ms
    25.000  release    peak@2.8 ms
    25.500  whoosh     peak@310.0 ms
-   26.000  pop        peak@3.0 ms
-   26.500  pop2       peak@3.0 ms
+   26.000  pop        peak@2.2 ms
+   26.500  pop2       peak@2.3 ms
    27.000  tick       peak@2.0 ms
-   27.500  ring       peak@11.3 ms
+   27.500  ring       peak@321.6 ms
    28.000  whoosh     peak@310.0 ms
-   28.500  grab       peak@3.0 ms
-   29.625  connect    peak@306.6 ms
+   28.500  grab       peak@3.1 ms
+   29.625  connect    peak@5.7 ms
    30.000  whooshBig  peak@450.0 ms
    31.000  wipe       peak@250.0 ms
    31.500  wipe2      peak@210.0 ms
-   32.000  pop        peak@3.0 ms
-   32.500  pop2       peak@3.0 ms
+   32.000  pop        peak@2.2 ms
+   32.500  pop2       peak@2.3 ms
    33.000  click      peak@2.3 ms
-   33.000  ripple     peak@12.0 ms
-   33.500  ripple     peak@12.0 ms
+   33.000  ripple     peak@20.8 ms
+   33.500  ripple     peak@20.8 ms
    34.000  sheen      peak@0.0 ms
    34.500  whooshBig  peak@450.0 ms
