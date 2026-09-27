@@ -16,6 +16,6 @@ for i, f in enumerate(fs):
     x, y = (i % cols) * tw, (i // cols) * (th + 22)
     sheet.paste(im, (x, y + 22))
     t = float(os.path.basename(f)[1:-4])
-    dr.text((x + 4, y + 4), f"t={t:.2f}  b{t*2:.1f}", fill=(255, 255, 0))
+    dr.text((x + 4, y + 4), f"t={t:.2f}  b{i + start}", fill=(255, 255, 0))
 sheet.save(out)
 print(out, sheet.size)

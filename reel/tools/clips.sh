@@ -12,7 +12,8 @@ ex() { # name source start end filter
   ffmpeg -v error -y -ss "$3" -to "$4" -i "assets/source/$2" -vf "$5,$GRADE" -q:v 2 -start_number 0 "$OUT/$1/f%03d.jpg"
   echo "$1: $(ls "$OUT/$1" | wc -l) frames"
 }
-ex walk     B_walk.mp4          0.20 1.95 "scale=1080:1920:flags=lanczos,unsharp=5:5:0.4"
+# the walk is motion-interpolated to 60 fps so it can play as smooth slow motion
+ex walk     B_walk.mp4          0.20 1.95 "minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1080:1920:flags=lanczos,unsharp=5:5:0.4"
 ex desk     A_desk.mp4          0.20 2.80 "crop=720:500:0:312"
 ex entrance B_bituach_leumi.mp4 0.20 2.16 "crop=720:800:0:0"
 ex walkout  B_bituach_leumi.mp4 2.20 6.00 "crop=720:800:0:0"

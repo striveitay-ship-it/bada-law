@@ -44,14 +44,14 @@ const browser = await chromium.launch({ args: ['--disable-gpu-vsync', '--disable
 try {
   if (mode === 'events') {
     const { page } = await openPage(browser);
-    const data = await page.evaluate(() => ({ T: window.REEL.T, BPM: window.REEL.BPM, events: window.REEL.EVENTS }));
+    const data = await page.evaluate(() => ({ T: window.REEL.T, BPM: window.REEL.BPM, NB: window.REEL.NB, events: window.REEL.EVENTS, curves: window.REEL.curves(1000) }));
     fs.writeFileSync(out, JSON.stringify(data, null, 1));
     console.log('events', data.events.length);
   } else if (mode === 'stills' || mode === 'beats') {
     fs.mkdirSync(out, { recursive: true });
     const P = await openPage(browser);
-    const T = await P.page.evaluate(() => window.REEL.T);
-    const times = mode === 'beats' ? Array.from({ length: 64 }, (_, i) => i * 0.5) : rest[0].split(',').map(Number);
+    const { T, NB, BEAT } = await P.page.evaluate(() => ({ T: window.REEL.T, NB: window.REEL.NB, BEAT: window.REEL.BEAT }));
+    const times = mode === 'beats' ? Array.from({ length: NB }, (_, i) => +(i * BEAT).toFixed(4)) : rest[0].split(',').map(Number);
     for (const t of times) {
       const buf = await grab(P, t);
       fs.writeFileSync(path.join(out, `t${t.toFixed(3).padStart(7, '0')}.png`), buf);

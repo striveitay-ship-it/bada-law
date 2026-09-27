@@ -33,9 +33,9 @@ html,body{margin:0;padding:0;background:var(--canvas);}
 (() => {
 'use strict';
 // ======================================================================
-// Time grid: 120 BPM, 64 beats, 32 s. The last frame flows into the first.
+// Time grid: 100 BPM, 72 beats, 43.2 s. The last frame flows into the first.
 // ======================================================================
-const BPM = 120, BEAT = 60 / BPM, NB = 64, T = NB * BEAT;
+const BPM = 100, BEAT = 60 / BPM, NB = 72, T = NB * BEAT;
 const b = n => n * BEAT;
 const COL = { canvas:'#E9E8E4', ink:'#0B0D11', navy:'#2C3A52', slate:'#556886', silver:'#C4CAD3', mute:'#6B717C', white:'#FFFFFF', line:'#DEDDD8' };
 
@@ -60,9 +60,11 @@ function S(tau, resp, damp) {
 // A value whose target changes many times = sum of one spring per change.
 // Each change also contributes from the previous loop, so the function is periodic in T.
 const TRACKS = [];
+const SOFT = 1.12;   // global spring softness (response multiplier)
+const VS = 1.15;     // global text enter/exit duration multiplier
 class Tr {
   constructor(v0, resp = .5, damp = .86, name = '') { this.v0 = v0; this.last = v0; this.ev = []; this.r = resp; this.d = damp; this.name = name; TRACKS.push(this); }
-  to(t, v, r = this.r, d = this.d) { const dv = v - this.last; if (Math.abs(dv) > 1e-9) this.ev.push([t, dv, r, d]); this.last = v; return this; }
+  to(t, v, r = this.r, d = this.d) { const dv = v - this.last; if (Math.abs(dv) > 1e-9) this.ev.push([t, dv, r * SOFT, d]); this.last = v; return this; }
   jump(t, v) { return this.to(t, v, 0, 1); }
   at(t) { let v = this.v0; for (const e of this.ev) v += e[1] * (S(t - e[0], e[2], e[3]) + S(t - e[0] + T, e[2], e[3])); return v; }
 }
@@ -82,6 +84,7 @@ function pulse(t, tc, amp, down = .16, up = .34) {
 }
 // Presence of an element entering at a and exiting at z (periodic). Returns {v, s}.
 function vis(t, a, z, inD = .26, outD = .14) {
+  inD *= VS; outD *= VS;
   let best = 0, side = 1;
   for (const k of [0, T, -T]) {
     const u = t + k;
@@ -214,19 +217,19 @@ const LS = new Tr(1);                                              // lock pulse
 const U1 = x => 203 + 0.684 * (x - 118), L1 = x => 370 + 0.694 * (x - 175);
 const U2 = x => 553 - 0.688 * (x - 630), L2 = x => 686 - 0.698 * (x - 630);
 const PIECES = [
-  { poly: [[40,1200],[40,U1(40)],[630,U1(630)],[630,L1(630)],[195,L1(195)],[195,1200]], t: b(11), from: [-640, 130, -9] },
-  { poly: [[1214,1200],[1214,U2(1214)],[630,U2(630)],[630,L2(630)],[1060,L2(1060)],[1060,1200]], t: b(11), from: [640, 130, 9] },
-  { poly: [[195,1200],[195,L1(195)],[630,L1(630)],[1060,L2(1060)],[1060,1200]], t: b(12), from: [0, 760, 0] },
-  { poly: [[200,80],[1060,80],[1060,U2(1060)],[630,U2(630)],[200,U1(200)]], t: b(13), from: [90, -760, 5] },
+  { poly: [[40,1200],[40,U1(40)],[630,U1(630)],[630,L1(630)],[195,L1(195)],[195,1200]], t: b(12), from: [-640, 130, -9] },
+  { poly: [[1214,1200],[1214,U2(1214)],[630,U2(630)],[630,L2(630)],[1060,L2(1060)],[1060,1200]], t: b(12), from: [640, 130, 9] },
+  { poly: [[195,1200],[195,L1(195)],[630,L1(630)],[1060,L2(1060)],[1060,1200]], t: b(13), from: [0, 760, 0] },
+  { poly: [[200,80],[1060,80],[1060,U2(1060)],[630,U2(630)],[200,U1(200)]], t: b(14), from: [90, -760, 5] },
 ];
 const lgClip = mk('div', ov, 'a', 'width:1080px;height:1920px;');
 PIECES.forEach(p => {
   p.el = mk('img', lgClip, 'a', 'width:1254px;height:1254px;transform-origin:0 0;visibility:hidden;');
   p.el.src = 'assets/logo_mono.png';
   p.el.style.clipPath = 'polygon(' + p.poly.map(([x, y]) => `${(x / 12.54).toFixed(3)}% ${(y / 12.54).toFixed(3)}%`).join(',') + ')';
-  p.dx = new Tr(p.from[0]).to(p.t, 0, .46, .8).jump(b(20), p.from[0]);
-  p.dy = new Tr(p.from[1]).to(p.t, 0, .46, .8).jump(b(20), p.from[1]);
-  p.rot = new Tr(p.from[2]).to(p.t, 0, .5, .82).jump(b(20), p.from[2]);
+  p.dx = new Tr(p.from[0]).to(p.t, 0, .46, .8).jump(b(22), p.from[0]);
+  p.dy = new Tr(p.from[1]).to(p.t, 0, .46, .8).jump(b(22), p.from[1]);
+  p.rot = new Tr(p.from[2]).to(p.t, 0, .5, .82).jump(b(22), p.from[2]);
   p.c = [p.poly.reduce((a, q) => a + q[0], 0) / p.poly.length, p.poly.reduce((a, q) => a + q[1], 0) / p.poly.length];
 });
 const lgFull = mk('img', lgClip, 'a', 'width:1254px;height:1254px;transform-origin:0 0;visibility:hidden;');
@@ -263,9 +266,9 @@ const tabInd = mk('div', shapeIn, 'a', 'border-radius:45px;background:#fff;visib
 const TABS = ['נזיקין', 'ביטוח לאומי', 'זכויות רפואיות'].map((s, i) => mk('div', shapeIn, 't', 'font-size:37px;font-weight:600;', s));
 const IND = { l: new Tr(SEG[0].x0 + 8), r: new Tr(SEG[0].x1 - 8) };
 const SERV = [
-  { t: b(23), title: 'נזיקין ותאונות דרכים', val: 'נלחמים על <span class="hl"><i></i><span class="hlw">כל שקל</span></span> שמגיע לכם.', hl: b(24) },
-  { t: b(26), title: 'ביטוח לאומי', val: '<span class="hl"><i></i><span class="hlw">ליווי אישי</span></span> עד הוועדה הרפואית.', hl: b(27) },
-  { t: b(29), title: 'זכויות רפואיות', val: 'פועלים למיצוי <span class="hl"><i></i><span class="hlw">כל הזכויות</span></span> שלכם.', hl: b(30) },
+  { t: b(27), title: 'נזיקין ותאונות דרכים', val: 'נלחמים על <span class="hl"><i></i><span class="hlw">כל שקל</span></span> שמגיע לכם.', hl: b(28) },
+  { t: b(31), title: 'ביטוח לאומי', val: '<span class="hl"><i></i><span class="hlw">ליווי אישי</span></span> עד הוועדה הרפואית.', hl: b(32) },
+  { t: b(35), title: 'זכויות רפואיות', val: 'פועלים למיצוי <span class="hl"><i></i><span class="hlw">כל הזכויות</span></span> שלכם.', hl: b(36) },
 ];
 SERV.forEach((s, i) => {
   s.tEl = mk('div', shapeIn, 't', `font-size:62px;font-weight:800;color:${COL.ink};letter-spacing:-.01em;`, s.title);
@@ -273,7 +276,7 @@ SERV.forEach((s, i) => {
   s.mark = s.vEl.querySelector('.hl i');
   s.end = i < 2 ? SERV[i + 1] && 0 : 0;
 });
-SERV[0].end = b(26); SERV[1].end = b(29); SERV[2].end = b(31);
+SERV[0].end = b(31); SERV[1].end = b(35); SERV[2].end = b(39);
 
 // ======================================================================
 // ACT 5 — "how it works" checklist (b31–b36)
@@ -283,7 +286,7 @@ const SP_AV = { x: 902, y: 597, w: 120, h: 120, r: 60 };
 const spTitle = mk('div', shapeIn, 't', `font-size:54px;font-weight:800;color:${COL.ink};`, 'ככה זה עובד אצלנו');
 const spSub = mk('div', shapeIn, 't', `font-size:33px;font-weight:500;color:${COL.mute};`, 'עו״ד מיכאל בדלוב');
 const STEPS = ['פגישת ייעוץ ראשונית', 'מגיעים אליכם', 'בונים את התיק ביחד', 'ליווי אישי — עד הסוף'].map((s, i) => {
-  const row = { y: 762 + i * 130, tc: b(32 + i) };
+  const row = { y: 762 + i * 130, tc: b(40 + i) };
   row.box = mk('div', shapeIn, 'a', 'width:64px;height:64px;border-radius:50%;visibility:hidden;');
   row.chk = icon(row.box, 'check', 36, '#fff', 'left:14px;top:15px;');
   row.label = mk('div', shapeIn, 't', 'font-size:46px;font-weight:600;', s);
@@ -309,7 +312,7 @@ const hrPause = icon(shapeIn, 'pause', 40, '#fff', 'visibility:hidden;');
 const hrTime = mk('div', shapeIn, 't ltr', 'font-size:30px;font-weight:500;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;', '0:00');
 const hrChip = mk('div', worldTop, 't', `font-size:37px;font-weight:600;color:${COL.ink};background:#fff;border-radius:40px;padding:20px 30px 20px 30px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>אנחנו איתכם — גם בוועדה.</span>');
 hrChip.insertBefore(icon(hrChip, 'pin', 36, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), hrChip.firstChild);
-const HERO = { t0: b(37), grab: b(39.5), rel: b(42), end: b(43), dur: 3.6 };
+const HERO = { t0: b(45), grab: b(47), rel: b(50), end: b(51), dur: 3.6 };
 const wayChip = mk('div', worldTop, 't', `font-size:40px;font-weight:600;color:${COL.ink};background:#fff;border-radius:44px;padding:22px 34px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>בדרך אליכם</span>');
 wayChip.insertBefore(icon(wayChip, 'pin', 38, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), wayChip.firstChild);
 
@@ -333,7 +336,7 @@ const clTitle = mk('div', onCanvas, 't', `font-size:62px;font-weight:800;color:$
 const clLabel = mk('div', shapeIn, 't', 'font-size:40px;font-weight:500;color:rgba(255,255,255,.78);', 'החליקו לשיחת ייעוץ');
 const clChev = [0, 1, 2].map(i => icon(shapeIn, 'chev', 40, '#fff', 'visibility:hidden;'));
 const clNum = mk('div', shapeIn, 't ltr', 'font-size:50px;font-weight:700;color:#fff;letter-spacing:.01em;', '050-3312607');
-const CALL = { grab: b(49), rel: b(51.25) };
+const CALL = { grab: b(57), rel: b(59.25) };
 
 // ======================================================================
 // ACT 9 — CTA card (b52–b60) → back to the icon (b61–b63)
@@ -354,7 +357,7 @@ const odo = [...PHONE].map((ch, i) => {
   const strip = mk('span', box, '', 'display:block;');
   for (let k = 0; k < 20; k++) mk('span', strip, '', '', String(k % 10));
   const d = +ch;
-  return { box, strip, d, tr: new Tr(d + 10).to(b(53) + i * .035, d, .62, .9).jump(b(62), d + 10) };
+  return { box, strip, d, tr: new Tr(d + 10).to(b(61) + i * .035, d, .62, .9).jump(b(70), d + 10) };
 });
 const CHIPS = ['נזיקין ותאונות דרכים', 'ביטוח לאומי', 'זכויות רפואיות'].map((s, i) =>
   mk('div', shapeIn, 't', `font-size:30px;font-weight:500;color:#fff;display:flex;align-items:center;gap:12px;`, `<i style="display:inline-block;width:14px;height:14px;background:${COL.silver};flex:none"></i><span>${s}</span>`));
@@ -387,96 +390,98 @@ function buildTimeline() {
   camTo(b(8), 540, 900, 1.075, .3, .78); ev(b(8), 'impact');
   camTo(b(9), 540, 900, 1.05, .5, .9); ev(b(9), 'pop');
   camTo(b(10), 540, 900, 1.035, .5, .9); ev(b(10), 'tick');
-  camTo(b(11), 540, 900, 1.0, .6, .9);
+  camTo(b(11), 540, 900, 1.055, .9, .92); ev(b(11), 'swell');
+  camTo(b(12), 540, 900, 1.0, .6, .9);
 
   // --- ACT 3
-  shapeTo(b(11), LG_SQ, .55, .86); ev(b(11), 'whoosh');
+  shapeTo(b(12), LG_SQ, .55, .86); ev(b(12), 'whoosh');
   PIECES.forEach(p => ev(p.t, 'clink', { i: PIECES.indexOf(p) }));
-  LS.to(b(14), 1.035, .18, .72).to(b(14) + .12, 1, .45, .82); ev(b(14), 'lock');
-  shapeTo(b(15), LG_TALL, .6, .88);
-  LP.x.to(b(15), LOGO_TALL.x, .6, .88); LP.y.to(b(15), LOGO_TALL.y, .6, .88); LP.s.to(b(15), LOGO_TALL.s, .6, .88);
+  LS.to(b(15), 1.035, .18, .72).to(b(15) + .12, 1, .45, .82); ev(b(15), 'lock');
+  shapeTo(b(15.6), LG_TALL, .6, .88);
+  LP.x.to(b(15.6), LOGO_TALL.x, .6, .88); LP.y.to(b(15.6), LOGO_TALL.y, .6, .88); LP.s.to(b(15.6), LOGO_TALL.s, .6, .88);
   ev(b(16), 'wipe'); ev(b(17), 'wipe2'); ev(b(18), 'tick');
   shapeTo(b(19), LG_SQ, .6, .88);
   LP.x.to(b(19), 540, .6, .88); LP.y.to(b(19), 900, .6, .88); LP.s.to(b(19), 660, .6, .88);
-  camTo(b(19), 540, 900, 1.06, .8, .9); ev(b(19), 'riser');
-  ev(b(20), 'dive');
+  camTo(b(19), 540, 900, 1.04, .8, .9); ev(b(20), 'fill');
+  camTo(b(21), 540, 900, 1.1, 1.1, .95); ev(b(21), 'riser');
+  ev(b(22), 'dive');
   // handoff at b21: camera identity, shape + media are the full frame
-  camJump(b(21), 540, 960, 1);
-  shapeJump(b(21), { x: 540, y: 960, w: 1080, h: 1920, r: 0, col: COL.white });
-  mediaJump(b(21), { x: 540, y: 960, w: 1080, h: 1920, r: 0, o: 1 });
+  camJump(b(24), 540, 960, 1);
+  shapeJump(b(24), { x: 540, y: 960, w: 1080, h: 1920, r: 0, col: COL.white });
+  mediaJump(b(24), { x: 540, y: 960, w: 1080, h: 1920, r: 0, o: 1 });
   // reset the logo placement while hidden
-  LP.x.jump(b(22), 540); LP.y.jump(b(22), 900); LP.s.jump(b(22), 600);
+  LP.x.jump(b(26), 540); LP.y.jump(b(26), 900); LP.s.jump(b(26), 600);
 
   // --- ACT 4
-  shapeTo(b(22), SV, .62, .88); mediaTo(b(22), SV_MEDIA, .56, .9); ev(b(22), 'whooshBig');
-  curTo(b(21.6), 837, 446, .55, .9);
-  click(b(23)); ev(b(23), 'swish');
-  curTo(b(25.2), 540, 446, .5, .9); click(b(26)); ev(b(26), 'swish');
-  IND.l.to(b(26), SEG[1].x0 + 8, .28, .8); IND.r.to(b(26), SEG[1].x1 - 8, .5, .9);
-  curTo(b(28.2), 243, 446, .5, .9); click(b(29)); ev(b(29), 'swish');
-  IND.l.to(b(29), SEG[2].x0 + 8, .28, .8); IND.r.to(b(29), SEG[2].x1 - 8, .5, .9);
-  IND.l.jump(b(40), SEG[0].x0 + 8); IND.r.jump(b(40), SEG[0].x1 - 8);
-  ev(b(24), 'mark'); ev(b(27), 'mark'); ev(b(30), 'mark');
+  shapeTo(b(26), SV, .62, .88); mediaTo(b(26), SV_MEDIA, .56, .9); ev(b(26), 'whooshBig');
+  curTo(b(25.2), 837, 446, .55, .9);
+  click(b(27)); ev(b(27), 'swish');
+  curTo(b(29.8), 540, 446, .5, .9); click(b(31)); ev(b(31), 'swish');
+  IND.l.to(b(31), SEG[1].x0 + 8, .28, .8); IND.r.to(b(31), SEG[1].x1 - 8, .5, .9);
+  curTo(b(33.8), 243, 446, .5, .9); click(b(35)); ev(b(35), 'swish');
+  IND.l.to(b(35), SEG[2].x0 + 8, .28, .8); IND.r.to(b(35), SEG[2].x1 - 8, .5, .9);
+  IND.l.jump(b(47.6), SEG[0].x0 + 8); IND.r.jump(b(47.6), SEG[0].x1 - 8);
+  ev(b(28), 'mark'); ev(b(32), 'mark'); ev(b(36), 'mark');
 
   // --- ACT 5
-  shapeTo(b(31), SP, .56, .88); mediaTo(b(31), SP_AV, .56, .9); ev(b(31), 'whoosh');
-  camTo(b(31), 540, 915, 1.08, .7, .9);
-  curTo(b(31.1), 930, 762, .5, .9);
+  shapeTo(b(39), SP, .56, .88); mediaTo(b(39), SP_AV, .56, .9); ev(b(39), 'whoosh');
+  camTo(b(39), 540, 915, 1.08, .7, .9);
+  curTo(b(39.1), 930, 762, .5, .9);
   STEPS.forEach((row, i) => {
-    if (i) curTo(row.tc - .2, 930, row.y, .28, .9);
+    if (i) curTo(row.tc - .4, 930, row.y, .28, .9);
     click(row.tc, 'check');
     PB.to(row.tc + .02, (i + 1) / 4, .38, .92);
   });
-  PB.jump(b(44), 0);
-  SC.to(b(36), 1.014, .18, .7).to(b(36) + .12, 1, .42, .85); ev(b(36), 'success');
-  curTo(b(36.2), 720, 1490, .6, .9);
+  PB.jump(b(52), 0);
+  SC.to(b(44), 1.014, .18, .7).to(b(44) + .12, 1, .42, .85); ev(b(44), 'success');
+  curTo(b(44.2), 720, 1490, .6, .9);
 
   // --- ACT 6
-  shapeTo(b(37), HR, .6, .88); mediaTo(b(37), HR_MEDIA, .6, .9); ev(b(37), 'whooshBig');
-  camTo(b(37), 540, 960, 1.0, .7, .9);
-  ev(b(38), 'pop');
+  shapeTo(b(45), HR, .6, .88); mediaTo(b(45), HR_MEDIA, .6, .9); ev(b(45), 'whooshBig');
+  camTo(b(45), 540, 960, 1.0, .7, .9);
+  ev(b(46), 'pop');
   const pGrab = (HERO.grab - HERO.t0) / HERO.dur;
-  curTo(b(38.7), HR_TRACK.x1 - pGrab * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .42, .92);
+  curTo(b(46.1), HR_TRACK.x1 - pGrab * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .42, .92);
   click(HERO.grab, 'grab');
   curTo(HERO.grab + .08, HR_TRACK.x1 - .08 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .6, .92);
-  curTo(b(40.6), HR_TRACK.x1 - .965 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .62, .92);
+  curTo(b(48.32), HR_TRACK.x1 - .965 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .62, .92);
   ev(HERO.grab + .05, 'dragStart', { until: HERO.rel }); ev(HERO.rel, 'release');
-  curTo(b(42.2), 1250, 1760, .8, .9);
+  curTo(b(50.2), 1250, 1760, .8, .9);
 
   // --- ACT 7
-  shapeTo(b(43), QB, .56, .86); mediaTo(b(43), Q_AV, .58, .88); ev(b(43), 'whoosh');
-  camTo(b(43), 540, 900, 1.04, .8, .9);
-  ev(b(44), 'pop'); ev(b(45), 'pop2'); ev(b(46), 'tick'); ev(b(47), 'ring');
+  shapeTo(b(51), QB, .56, .86); mediaTo(b(51), Q_AV, .58, .88); ev(b(51), 'whoosh');
+  camTo(b(51), 540, 900, 1.04, .8, .9);
+  ev(b(52), 'pop'); ev(b(53), 'pop2'); ev(b(54), 'tick'); ev(b(55), 'ring');
 
   // --- ACT 8
-  shapeTo(b(48), CL, .5, .86); mediaTo(b(48), { x: KNOB.x0, y: KNOB.y, w: KNOB.d, h: KNOB.d, r: KNOB.d / 2 }, .52, .88); ev(b(48), 'whoosh');
-  camTo(b(48), 540, 960, 1.06, .7, .9);
-  curTo(b(47.9), KNOB.x0, KNOB.y, .5, .92);
+  shapeTo(b(56), CL, .5, .86); mediaTo(b(56), { x: KNOB.x0, y: KNOB.y, w: KNOB.d, h: KNOB.d, r: KNOB.d / 2 }, .52, .88); ev(b(56), 'whoosh');
+  camTo(b(56), 540, 960, 1.06, .7, .9);
+  curTo(b(55.9), KNOB.x0, KNOB.y, .5, .92);
   click(CALL.grab, 'grab');
   curTo(CALL.grab + .08, KNOB.x1, KNOB.y, .62, .92);
-  curTo(b(50.5), 55, KNOB.y + 4, .42, .9);
+  curTo(b(58.5), 55, KNOB.y + 4, .42, .9);
   ev(CALL.grab + .05, 'dragStart', { until: CALL.rel }); ev(CALL.rel, 'connect');
   SH.col.to(CALL.rel, COL.navy, .3, 1);
   curTo(CALL.rel + .15, 760, 1340, .65, .9);
 
   // --- ACT 9
-  shapeTo(b(52), CT, .62, .88); ev(b(52), 'whooshBig');
+  shapeTo(b(60), CT, .62, .88); ev(b(60), 'whooshBig');
   MD.x.jump(CALL.rel, KNOB.x1);   // the knob ends the drag at the far end
-  mediaTo(b(52), { x: CALLBTN.x, y: CALLBTN.y, w: CALLBTN.d, h: CALLBTN.d, r: CALLBTN.d / 2 }, .6, .88);
-  camTo(b(52), 540, 930, 1.04, .7, .9);
-  LG2.x.jump(b(50), 540); LG2.y.jump(b(50), CT_LAYOUT.logo); LG2.s.jump(b(50), CT_LAYOUT.logoS);
-  ev(b(53), 'roll'); ev(b(54), 'wipe'); ev(b(55), 'wipe2'); ev(b(56), 'pop'); ev(b(57), 'pop2');
-  curTo(b(57.1), CALLBTN.x - 6, CALLBTN.y + 8, .5, .92);
-  click(b(58)); ev(b(58), 'ripple'); ev(b(59), 'ripple');
-  curTo(b(58.4), 830, 1580, .75, .9);
-  ev(b(60), 'sheen');
+  mediaTo(b(60), { x: CALLBTN.x, y: CALLBTN.y, w: CALLBTN.d, h: CALLBTN.d, r: CALLBTN.d / 2 }, .6, .88);
+  camTo(b(60), 540, 930, 1.04, .7, .9);
+  LG2.x.jump(b(58), 540); LG2.y.jump(b(58), CT_LAYOUT.logo); LG2.s.jump(b(58), CT_LAYOUT.logoS);
+  ev(b(61), 'roll'); ev(b(62), 'wipe'); ev(b(63), 'wipe2'); ev(b(64), 'pop'); ev(b(65), 'pop2');
+  curTo(b(65.1), CALLBTN.x - 6, CALLBTN.y + 8, .5, .92);
+  click(b(66)); ev(b(66), 'ripple'); ev(b(67), 'ripple');
+  curTo(b(66.4), 830, 1580, .75, .9);
+  ev(b(68), 'sheen');
 
   // --- back to the icon (b61–b63) → loop
-  shapeTo(b(61), ICON, .62, .88); ev(b(61), 'whooshBig');
-  camTo(b(61), 540, 915, 1.7, .95, .92);
-  LG2.x.to(b(61), 540, .62, .88); LG2.y.to(b(61), 900, .62, .88); LG2.s.to(b(61), 210, .62, .88);
-  mediaTo(b(61), { x: 540, y: 900, w: 0, h: 0, r: 0, o: 0 }, .45, 1);
-  curTo(b(62.85), 560, 930, .5, .9);
+  shapeTo(b(69), ICON, .62, .88); ev(b(69), 'whooshBig');
+  camTo(b(69), 540, 915, 1.7, .95, .92);
+  LG2.x.to(b(69), 540, .62, .88); LG2.y.to(b(69), 900, .62, .88); LG2.s.to(b(69), 210, .62, .88);
+  mediaTo(b(69), { x: 540, y: 900, w: 0, h: 0, r: 0, o: 0 }, .45, 1);
+  curTo(b(70.85), 560, 930, .5, .9);
 }
 
 // ======================================================================
@@ -511,13 +516,14 @@ const CT_LAYOUT = { logo: 585, logoS: 230, name: 781, sub: 861, div: 918, lead: 
 function camBase(t) { return { x: CAM.x.at(t), y: CAM.y.at(t), z: Math.exp(CAM.lz.at(t)) }; }
 function logoWorldPoint(t, u, v) { const x = LP.x.at(t), y = LP.y.at(t), s = LP.s.at(t); return [x + (u / 1254 - .5) * s, y + (v / 1254 - .5) * s]; }
 function camera(t) {
-  const t0 = b(20), t1 = b(21);
+  const t0 = b(22), t1 = b(24);
   if (t >= t0 && t < t1) {
-    const c0 = camBase(t0);
+    // the dive rides on top of the camera's own push, so it starts with the same velocity
+    const base = camBase(t), c0 = camBase(t0);
     const P = logoWorldPoint(t, DIVE_P[0], DIVE_P[1]);
-    const s0 = [(P[0] - c0.x) * c0.z + 540, (P[1] - c0.y) * c0.z + 960];
     const u = (t - t0) / (t1 - t0);
-    const z = Math.exp(lerp(Math.log(c0.z), Math.log(46), Math.pow(u, 2.6)));
+    const z = base.z * Math.exp(Math.log(46 / c0.z) * Math.pow(u, 2.6));
+    const s0 = [(P[0] - base.x) * base.z + 540, (P[1] - base.y) * base.z + 960];
     const e = eInOut3(c01(u * 1.25));
     const s = [lerp(s0[0], 540, e), lerp(s0[1], 960, e)];
     return { x: P[0] - (s[0] - 540) / z, y: P[1] - (s[1] - 960) / z, z };
@@ -530,7 +536,7 @@ const toScreen = (c, x, y) => [(x - c.x) * c.z + 540, (y - c.y) * c.z + 960];
 // footage
 // ======================================================================
 const CLIPS = {
-  walk:     { n: 42, fps: 24, w: 1080, h: 1920 },
+  walk:     { n: 101, fps: 60, w: 1080, h: 1920 },   // motion-interpolated to 60 fps for the slow-mo
   desk:     { n: 78, fps: 30, w: 720, h: 500 },
   entrance: { n: 45, fps: 24, w: 720, h: 800 },
   walkout:  { n: 87, fps: 24, w: 720, h: 800 },
@@ -540,12 +546,12 @@ const CLIPS = {
 const clipSrc = (c, i) => `assets/clips/${c}/f${String(i).padStart(3, '0')}.jpg`;
 // segments on the media element; framing: focus (fx, fy) and zoom track k
 const SEGS = [
-  { t0: b(19), t1: b(23), clip: 'walk', f0: 0, rate: .85, fx: .5, fy: .5, k: new Tr(1) },
-  { t0: b(23), t1: b(26), clip: 'desk', f0: 8, rate: 1, fx: .42, fy: .5, k: new Tr(1) },
-  { t0: b(26), t1: b(29), clip: 'entrance', f0: 0, rate: 1, fx: .5, fy: .4, k: new Tr(1) },
-  { t0: b(29), t1: b(37), clip: 'talk2', f0: 0, rate: .95, fx: .54, fy: .56, k: new Tr(1).to(b(31), 1.85, .56, .9).jump(b(40), 1) },
-  { t0: b(37), t1: b(43), clip: 'walkout', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1), scrub: true },
-  { t0: b(43), t1: b(52), clip: 'talk3', f0: 0, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
+  { t0: b(20), t1: b(27), clip: 'walk', f0: 0, rate: .4, fx: .5, fy: .5, k: new Tr(1) },
+  { t0: b(27), t1: b(31), clip: 'desk', f0: 4, rate: 1, fx: .42, fy: .5, k: new Tr(1).to(b(27.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(31), t1: b(35), clip: 'entrance', f0: 0, rate: .75, fx: .5, fy: .4, k: new Tr(1).to(b(31.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(35), t1: b(45), clip: 'talk2', f0: 0, rate: 1, mode: 'pingpong', fx: .54, fy: .56, k: new Tr(1).to(b(39), 1.85, .56, .9).jump(b(47.6), 1) },
+  { t0: b(45), t1: b(51), clip: 'walkout', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1), scrub: true },
+  { t0: b(51), t1: b(60), clip: 'talk3', f0: 0, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
 ];
 function heroP(t) {
   const tc = CUR_AT(t);
@@ -599,6 +605,38 @@ function disp(el, on) { const v = on ? '' : 'none'; if (el._d !== v) { el.style.
 function box(el, x, y, w, h, r) { el.style.transform = `translate(${(x - w / 2).toFixed(2)}px,${(y - h / 2).toFixed(2)}px)`; el.style.width = w.toFixed(2) + 'px'; el.style.height = h.toFixed(2) + 'px'; if (r != null) el.style.borderRadius = r.toFixed(2) + 'px'; }
 
 let CUR_AT = t => ({ x: CUR.x.at(t), y: CUR.y.at(t) });
+
+// slide-to-call knob: direct manipulation while held, springs back from wherever it was on release
+function knobAt(t) {
+  const rub = o => (1 - 1 / (o * .55 / 120 + 1)) * 120;
+  let kx, st = 0, g;
+  if (t < CALL.rel) {
+    const cx = Math.min(KNOB.x0, CUR_AT(t).x);
+    if (cx >= KNOB.x1) kx = cx; else { st = rub(KNOB.x1 - cx); kx = KNOB.x1 - st / 2; }
+    g = 1 + .08 * S(t - CALL.grab, .22, .8);
+  } else {
+    const st0 = rub(Math.max(0, KNOB.x1 - CUR_AT(CALL.rel).x));
+    st = st0 * (1 - S(t - CALL.rel, .32, .78)); kx = KNOB.x1 - st / 2;
+    g = 1 + .08 * (1 - S(t - CALL.rel, .3, .85));
+  }
+  return { kx, st, g };
+}
+
+// curves the sound design follows: scrub position, knob travel, odometer digits
+function curves(rate = 1000) {
+  const samp = (t0, t1, f) => { const n = Math.round((t1 - t0) * rate); return { t0, rate, v: Array.from({ length: n }, (_, i) => +f(t0 + i / rate).toFixed(5)) }; };
+  const ticks = [];
+  odo.forEach((o, i) => {
+    if (!o.strip) return;
+    let last = null;
+    for (let t = b(61); t < b(61) + 2.5; t += 1 / rate) { const p = Math.round(o.tr.at(t)); if (last !== null && p !== last) ticks.push({ t: +t.toFixed(4), i }); last = p; }
+  });
+  return {
+    scrub: Object.assign(samp(HERO.grab - .05, HERO.rel + .5, heroP), { grab: HERO.grab, rel: HERO.rel, dur: HERO.dur }),
+    knob: Object.assign(samp(CALL.grab - .05, CALL.rel + .6, t => { const k = knobAt(t); return (KNOB.x0 - (k.kx - k.st / 2)) / (KNOB.x0 - KNOB.x1); }), { grab: CALL.grab, rel: CALL.rel }),
+    odo: ticks,
+  };
+}
 
 // ======================================================================
 // seek(t): every style is a pure function of t
@@ -655,7 +693,7 @@ async function seek(tIn) {
   // ---------- ACT 2: statement ----------
   {
     const RX = 944;
-    const V1 = vis(t, b(6) + .08, b(11), .3, .14), V2 = vis(t, b(7), b(11) + .03, .28, .14);
+    const V1 = vis(t, b(6) + .08, b(12), .3, .14), V2 = vis(t, b(7), b(12) + .03, .28, .14);
     if (V1.v > 0 || V2.v > 0) {
       showEl(stL1);
       stL1.style.transform = `translate(${RX}px,588px) translate(-100%,-50%)`;
@@ -666,17 +704,17 @@ async function seek(tIn) {
         w.style.transform = `translateY(${((1 - v) * (V.s > 0 ? 60 : -26)).toFixed(2)}px)`;
       });
     } else hide(stL1);
-    place(stL2, RX + 6, 850, vis(t, b(8), b(11) + .06, .22, .14), { dy: 90, dyOut: 30, blur: 22, scale: .06 });
-    if (place(stSub, RX, 1150, vis(t, b(9), b(11) + .09, .3, .14), { dy: 20, blur: 10 })) {
-      const u = inWin(t, b(10), b(11) + .5) ? eOut3(c01(since(t, b(10)) / .3)) : 0;
+    place(stL2, RX + 6, 850, vis(t, b(8), b(12) + .06, .22, .14), { dy: 90, dyOut: 30, blur: 22, scale: .06 });
+    if (place(stSub, RX, 1150, vis(t, b(9), b(12) + .09, .3, .14), { dy: 20, blur: 10 })) {
+      const u = inWin(t, b(10), b(12) + .5) ? eOut3(c01(since(t, b(10)) / .3)) : 0;
       stSub.querySelector('.hl2 i').style.transform = `scaleX(${u.toFixed(4)})`;
     }
   }
 
   // ---------- ACT 3: logo overlay ----------
   const lx = LP.x.at(t), ly = LP.y.at(t), ls = LP.s.at(t) * LS.at(t);
-  const inLogo = inWin(t, b(10), b(21));
-  disp(lgClip, inLogo); disp(footLogo, inLogo && t >= b(19) && t < b(21)); disp(lgLine, inLogo && t >= b(19) && t < b(21));
+  const inLogo = inWin(t, b(10), b(24));
+  disp(lgClip, inLogo); disp(footLogo, inLogo && t >= b(20) && t < b(24)); disp(lgLine, inLogo && t >= b(20) && t < b(24));
   if (inLogo) {
     showEl(lgClip);
     // clip the build to the card (screen space)
@@ -686,8 +724,8 @@ async function seek(tIn) {
     const [ox, oy] = toScreen(cam, lx - ls / 2, ly - ls / 2);
     const k = ls * cam.z / 1254;
     PIECES.forEach((p, i) => {
-      const V = vis(t, p.t, b(14), .14, .01);
-      if (V.v > .003 && t < b(14)) {
+      const V = vis(t, p.t, b(15), .14, .01);
+      if (V.v > .003 && t < b(15)) {
         showEl(p.el);
         p.el.style.opacity = V.v;
         const dx = p.dx.at(t), dy = p.dy.at(t), rot = p.rot.at(t);
@@ -695,15 +733,15 @@ async function seek(tIn) {
         p.el.style.transformOrigin = '0 0';
       } else hide(p.el);
     });
-    const fullOn = t >= b(14) && t < b(21);
-    const footMix = c01((t - b(19)) / .3);
+    const fullOn = t >= b(15) && t < b(24);
+    const footMix = c01((t - b(20)) / .36);
     if (fullOn && footMix < 1) {
       showEl(lgFull);
       lgFull.style.opacity = 1 - footMix;
       lgFull.style.transform = `translate(${ox.toFixed(2)}px,${oy.toFixed(2)}px) scale(${k.toFixed(5)})`;
     } else hide(lgFull);
     // sheen sweep after the lock
-    const sd = t - b(14.15);
+    const sd = t - b(15.09);
     if (sd > 0 && sd < 1.1 && footMix < 1) {
       showEl(sheenBox);
       sheenBox.style.transform = `translate(${ox.toFixed(2)}px,${oy.toFixed(2)}px) scale(${k.toFixed(5)})`;
@@ -711,7 +749,7 @@ async function seek(tIn) {
       sheen.style.transform = `translate(${lerp(-700, 1600, u).toFixed(1)}px,-600px) rotate(24deg)`;
     } else hide(sheenBox);
     // footage inside the monogram, then the dive
-    if (t >= b(19) && t < b(21)) {
+    if (t >= b(20) && t < b(24)) {
       showEl(footLogo);
       footLogo.style.opacity = footMix;
       const a = k;
@@ -719,7 +757,7 @@ async function seek(tIn) {
       const M = `matrix(${(0.05 * a).toFixed(6)} 0 0 ${(-0.05 * a).toFixed(6)} ${e.toFixed(3)} ${(a * 1254 + f).toFixed(3)})`;
       $('cpLogoPath').setAttribute('transform', M);
       lgLinePath.setAttribute('transform', M);
-      lgLine.style.opacity = footMix * (1 - c01((t - b(20.55)) / .25));
+      lgLine.style.opacity = footMix * (1 - c01((t - b(23.1)) / .25));
       const seg = SEGS[0];
       const src = clipSrc(seg.clip, segFrame(seg, t));
       if (footImg._src !== src) { footImg._src = src; footImg.src = src; pending.add(footImg); }
@@ -759,16 +797,16 @@ async function seek(tIn) {
 
   // ---------- ACT 4: services ----------
   {
-    const Vb = vis(t, b(22) + .16, b(31), .32, .14);
+    const Vb = vis(t, b(26) + .16, b(39), .32, .14);
     if (Vb.v > .003) {
       showEl(tabBar); tabBar.style.opacity = Vb.v;
       tabBar.style.transform = `translateY(${((1 - Vb.v) * -14).toFixed(2)}px) scale(${(.96 + .04 * Vb.v).toFixed(4)})`;
     } else hide(tabBar);
-    const Vi = vis(t, b(23), b(31), .2, .14);
+    const Vi = vis(t, b(27), b(39), .2, .14);
     if (Vi.v > .003) {
       showEl(tabInd);
       const l = IND.l.at(t), r = IND.r.at(t);
-      const grow = S(since(t, b(23)) < 2 ? since(t, b(23)) : 5, .36, .8);
+      const grow = S(since(t, b(27)) < 2 ? since(t, b(27)) : 5, .36, .8);
       const cx = (l + r) / 2, w = (r - l) * (.55 + .45 * grow);
       tabInd.style.opacity = Vi.v;
       box(tabInd, cx, (TABBAR.y0 + TABBAR.y1) / 2, w, TABBAR.y1 - TABBAR.y0 - 16, 45);
@@ -795,12 +833,12 @@ async function seek(tIn) {
 
   // ---------- ACT 5: steps ----------
   {
-    const V = vis(t, b(31) + .12, b(37), .3, .14);
+    const V = vis(t, b(39) + .12, b(45), .3, .14);
     place(spTitle, 814, 574, V, { dy: 16 });
-    place(spSub, 814, 630, vis(t, b(31) + .17, b(37), .3, .14), { dy: 16 });
+    place(spSub, 814, 630, vis(t, b(39) + .17, b(45), .3, .14), { dy: 16 });
     STEPS.forEach((row, i) => {
-      const Vr = vis(t, b(31) + .2 + i * .05, b(37) + i * .015, .32, .14);
-      const done = inWin(t, row.tc, b(37) + .5) ? c01(since(t, row.tc) / .12) : 0;
+      const Vr = vis(t, b(39) + .2 + i * .05, b(45) + i * .015, .32, .14);
+      const done = inWin(t, row.tc, b(45) + .5) ? c01(since(t, row.tc) / .12) : 0;
       if (Vr.v > .003) {
         showEl(row.box);
         const pop = 1 + pulse(t, row.tc, -.14, .12, .3);
@@ -810,7 +848,7 @@ async function seek(tIn) {
         row.box.style.opacity = Vr.v;
         row.box.style.filter = Vr.v < .99 ? `blur(${((1 - Vr.v) * 8).toFixed(2)}px)` : 'none';
         row.box.style.transform = `translate(${930 - 32}px,${(row.y - 32 + (1 - Vr.v) * 16).toFixed(2)}px) scale(${pop.toFixed(4)})`;
-        drawIcon(row.chk, inWin(t, row.tc, b(37) + .5) ? (since(t, row.tc) - .03) / .2 : 0);
+        drawIcon(row.chk, inWin(t, row.tc, b(45) + .5) ? (since(t, row.tc) - .03) / .2 : 0);
         row.label.style.color = `rgb(${lerp(140, 11, done)},${lerp(144, 13, done)},${lerp(152, 17, done)})`;
       } else hide(row.box);
       place(row.label, 870, row.y, Vr, { dy: 16, blur: 8 });
@@ -818,7 +856,7 @@ async function seek(tIn) {
         if (Vr.v > .003) { showEl(row.sep); row.sep.style.opacity = Vr.v; box(row.sep, (118 + 870) / 2 + 46, row.y + 65, 962 - 118, 2); } else hide(row.sep);
       }
     });
-    const Vb = vis(t, b(31) + .4, b(37) + .06, .3, .14);
+    const Vb = vis(t, b(39) + .4, b(45) + .06, .3, .14);
     if (Vb.v > .003) {
       showEl(spBarBg); showEl(spBar);
       spBarBg.style.opacity = Vb.v; spBar.style.opacity = Vb.v;
@@ -827,14 +865,14 @@ async function seek(tIn) {
       box(spBar, SP_BAR.x1 - w / 2, SP_BAR.y, Math.max(w, 0.001), 14, 7);
     } else { hide(spBarBg); hide(spBar); }
     spPct.forEach((el, i) => {
-      const a = i === 0 ? b(31) + .45 : STEPS[i - 1].tc + .02, z = i < 4 ? STEPS[i].tc + .02 : b(37) + .06;
+      const a = i === 0 ? b(39) + .45 : STEPS[i - 1].tc + .02, z = i < 4 ? STEPS[i].tc + .02 : b(45) + .06;
       place(el, SP_BAR.x0, SP_BAR.y - 44, vis(t, a, z, .2, .08), { anchor: 'l', dy: 14, dyOut: 14, blur: 6 });
     });
   }
 
   // ---------- ACT 6: hero ----------
   {
-    const Vc = vis(t, b(37) + .3, b(43), .32, .14);
+    const Vc = vis(t, b(45) + .3, b(51), .32, .14);
     if (Vc.v > .003) {
       [hrTrack, hrFill, hrKnob].forEach(showEl);
       const p = heroP(t);
@@ -852,17 +890,17 @@ async function seek(tIn) {
       hrTime.textContent = `0:${String(Math.floor(secs)).padStart(2, '0')}`;
       place(hrTime, 118, y, Vc, { anchor: 'l', dy: 12, blur: 6 });
     } else { [hrTrack, hrFill, hrKnob].forEach(hide); hrPause.style.visibility = 'hidden'; hide(hrTime); }
-    place(hrChip, 540 + 920 / 2 - 28, 810 + 1040 / 2 - 64, vis(t, b(38), b(43), .34, .14), { dy: 16, blur: 10, scale: .08 });
+    place(hrChip, 540 + 920 / 2 - 28, 810 + 1040 / 2 - 64, vis(t, b(46), b(51), .34, .14), { dy: 16, blur: 10, scale: .08 });
   }
 
   // ---------- ACT 7: quote ----------
   {
-    place(qL1, 540, 868, vis(t, b(44), b(48), .3, .14), { anchor: 'c', dy: 20 });
-    place(qL2, 540, 943, vis(t, b(44) + .1, b(48) + .02, .3, .14), { anchor: 'c', dy: 20 });
-    place(qL3, 540, 1044, vis(t, b(45), b(48) + .04, .3, .14), { anchor: 'c', dy: 20 });
-    place(qSig, 540, 1140, vis(t, b(46), b(48) + .06, .3, .14), { anchor: 'c', dy: 14 });
-    const d = since(t, b(47));
-    const V = vis(t, b(47), b(48), .01, .14);
+    place(qL1, 540, 868, vis(t, b(52), b(56), .3, .14), { anchor: 'c', dy: 20 });
+    place(qL2, 540, 943, vis(t, b(52) + .1, b(56) + .02, .3, .14), { anchor: 'c', dy: 20 });
+    place(qL3, 540, 1044, vis(t, b(53), b(56) + .04, .3, .14), { anchor: 'c', dy: 20 });
+    place(qSig, 540, 1140, vis(t, b(54), b(56) + .06, .3, .14), { anchor: 'c', dy: 14 });
+    const d = since(t, b(55));
+    const V = vis(t, b(55), b(56), .01, .14);
     if (V.v > .003) {
       showEl(avRing);
       const p = eOut3(c01(d / .5));
@@ -874,27 +912,27 @@ async function seek(tIn) {
 
   // ---------- ACT 8: call ----------
   {
-    place(clTitle, 540, 846, vis(t, b(48) + .12, b(52), .32, .14), { anchor: 'c', dy: 20 });
-    const Vl = vis(t, b(48) + .16, CALL.grab + .75, .3, .3);
+    place(clTitle, 540, 846, vis(t, b(56) + .12, b(60), .32, .14), { anchor: 'c', dy: 20 });
+    const Vl = vis(t, b(56) + .16, CALL.grab + .75, .3, .3);
     place(clLabel, 500, 1000, Vl, { anchor: 'c', dy: 12, blur: 8 });
     clChev.forEach((c, i) => {
       if (Vl.v > .003) {
         c.style.visibility = 'visible';
-        const ph = ((t - b(48)) * 2 - i * .18) % 1;
+        const ph = ((t - b(56)) * 2 - i * .18) % 1;
         const a = .25 + .75 * Math.pow(Math.max(0, Math.sin(Math.PI * c01(ph))), 2);
         c.style.opacity = Vl.v * a;
         c.style.transform = `translate(${270 - i * 26 - 20}px,${1000 - 20}px)`;
       } else c.style.visibility = 'hidden';
     });
-    place(clNum, 520, 1000, vis(t, CALL.rel + .08, b(52), .3, .14), { anchor: 'c', dy: 14 });
+    place(clNum, 520, 1000, vis(t, CALL.rel + .08, b(60), .3, .14), { anchor: 'c', dy: 14 });
   }
 
   // ---------- ACT 9: CTA ----------
-  place(iconLabel, 540, 1086, vis(t, b(61.6), T, .4, .12), { anchor: 'c', dy: 12, blur: 8 });
+  place(iconLabel, 540, 1086, vis(t, b(69.6), T, .4, .12), { anchor: 'c', dy: 12, blur: 8 });
   {
     const L = CT_LAYOUT;
     // logo (CTA + icon): enters at b52, stays through the loop point, exits as the pill forms
-    const Vg = vis(t, b(52) + .1, T, .34, .16);
+    const Vg = vis(t, b(60) + .1, T, .34, .16);
     if (Vg.v > .003) {
       showEl(logoEl);
       const x = LG2.x.at(t), y = LG2.y.at(t), s = LG2.s.at(t);
@@ -914,22 +952,22 @@ async function seek(tIn) {
       el.style.opacity = V.s < 0 ? V.v : 1;
       el.style.filter = V.s < 0 && V.v < .99 ? `blur(${((1 - V.v) * 10).toFixed(2)}px)` : 'none';
     };
-    img(ctName, L.name, 620, 155 / 1158, b(54), b(61));
-    img(ctSub, L.sub, 290, 88 / 524, b(55), b(61) + .02);
-    const Vd = vis(t, b(55), b(61) + .03, .5, .14);
+    img(ctName, L.name, 620, 155 / 1158, b(62), b(69));
+    img(ctSub, L.sub, 290, 88 / 524, b(63), b(69) + .02);
+    const Vd = vis(t, b(63), b(69) + .03, .5, .14);
     if (Vd.v > .003) { showEl(ctDiv); ctDiv.style.opacity = Vd.v; box(ctDiv, 540, L.div, 680 * (Vd.s > 0 ? eOut3(Vd.v) : 1), 2); } else hide(ctDiv);
-    place(ctLead, 540, L.lead, vis(t, b(52) + .18, b(61) + .02, .3, .14), { anchor: 'c', dy: 16 });
-    const Vn = vis(t, b(53), b(61) + .04, .2, .14);
+    place(ctLead, 540, L.lead, vis(t, b(60) + .18, b(69) + .02, .3, .14), { anchor: 'c', dy: 16 });
+    const Vn = vis(t, b(61), b(69) + .04, .2, .14);
     if (place(ctNum, W.numLeft ?? 100, L.num, Vn, { anchor: 'l', dy: 0, blur: 0 })) {
       odo.forEach(o => { if (o.strip) { const pos = o.tr.at(t); o.strip.style.transform = `translateY(${(-pos).toFixed(4)}em)`; } });
     }
-    CHIPS.forEach((c, i) => { const V = vis(t, b(56) + i * .06, b(61) + .05, .3, .14); c._V = V; });
+    CHIPS.forEach((c, i) => { const V = vis(t, b(64) + i * .06, b(69) + .05, .3, .14); c._V = V; });
     { const gap = 34; const tot = W.chips.reduce((a, c) => a + c, 0) + gap * 2; let x = 540 + tot / 2;
       CHIPS.forEach((c, i) => { place(c, x, L.chips, c._V, { dy: 14 }); x -= W.chips[i] + gap; }); }
-    place(ctHandle, 540, L.handle, vis(t, b(57), b(61) + .06, .32, .14), { anchor: 'c', dy: 18, scale: .06 });
+    place(ctHandle, 540, L.handle, vis(t, b(65), b(69) + .06, .32, .14), { anchor: 'c', dy: 18, scale: .06 });
     // ripple from the call button
-    const dR = since(t, inWin(t, b(59), b(61)) ? b(59) : b(58));
-    if (dR < .75 && inWin(t, b(58), b(61))) {
+    const dR = since(t, inWin(t, b(67), b(69)) ? b(67) : b(66));
+    if (dR < .75 && inWin(t, b(66), b(69))) {
       showEl(mRing); const p = eOut3(dR / .75); const sz = CALLBTN.d + 150 * p;
       mRing.style.opacity = (1 - p) * .9; box(mRing, CALLBTN.x, CALLBTN.y, sz, sz, sz / 2);
     } else hide(mRing);
@@ -940,24 +978,12 @@ async function seek(tIn) {
     let mx = MD.x.at(t), my = MD.y.at(t), mw = Math.max(0, MD.w.at(t)), mh = Math.max(0, MD.h.at(t)), mr = Math.max(0, MD.r.at(t));
     const mo = c01(MD.o.at(t));
     let g = 1;
-    if (t >= CALL.grab && t < b(52)) {
-      // slide-to-call knob: direct manipulation while held, springs back from wherever it was on release
-      const d = KNOB.d;
-      const rub = o => (1 - 1 / (o * .55 / 120 + 1)) * 120;
-      let kx, st = 0;
-      if (t < CALL.rel) {
-        const cx = Math.min(KNOB.x0, CUR_AT(t).x);
-        if (cx >= KNOB.x1) kx = cx; else { st = rub(KNOB.x1 - cx); kx = KNOB.x1 - st / 2; }
-        g = 1 + .08 * S(t - CALL.grab, .22, .8);
-      } else {
-        const st0 = rub(Math.max(0, KNOB.x1 - CUR_AT(CALL.rel).x));
-        st = st0 * (1 - S(t - CALL.rel, .32, .78)); kx = KNOB.x1 - st / 2;
-        g = 1 + .08 * (1 - S(t - CALL.rel, .3, .85));
-      }
-      mx = kx; my = KNOB.y; mw = d + st; mh = d; mr = d / 2;
+    if (t >= CALL.grab && t < b(60)) {
+      const k = knobAt(t);
+      g = k.g; mx = k.kx; my = KNOB.y; mw = KNOB.d + k.st; mh = KNOB.d; mr = KNOB.d / 2;
     }
-    const pressB = pulse(t, b(58), -.08);
-    const on = mo > .003 && mw > 1 && mh > 1 && t >= b(21);
+    const pressB = pulse(t, b(66), -.08);
+    const on = mo > .003 && mw > 1 && mh > 1 && t >= b(24);
     disp(media, on);
     if (!on) hide(wayChip);
     if (on) {
@@ -981,8 +1007,8 @@ async function seek(tIn) {
         im.style.opacity = al;
         im.style.filter = al < 1 ? `blur(${((1 - al) * 14).toFixed(2)}px)` : 'none';
       });
-      place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(21) + .1, b(23), .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
-      const Vi = vis(t, CALL.rel, b(61), .22, .14);
+      place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(25), b(27), .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
+      const Vi = vis(t, CALL.rel, b(69), .22, .14);
       if (Vi.v > .003) { showEl(mIcon); mIcon.style.opacity = Vi.v; mIconSvg.style.transform = `translate(-50%,-50%) scale(${(.6 + .4 * Vi.v).toFixed(4)})`; } else hide(mIcon);
     }
   }
@@ -1008,7 +1034,7 @@ async function seek(tIn) {
   await Promise.all(ps);
 }
 
-window.REEL = { T, BPM, NB, BEAT, EVENTS, seek, ready: init().then(() => true) };
+window.REEL = { T, BPM, NB, BEAT, EVENTS, seek, curves: r => curves(r), ready: init().then(() => true) };
 })();
 </script>
 </body>
