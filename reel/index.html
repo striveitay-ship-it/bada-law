@@ -313,7 +313,7 @@ const hrPause = icon(shapeIn, 'pause', 40, '#fff', 'visibility:hidden;');
 const hrTime = mk('div', shapeIn, 't ltr', 'font-size:30px;font-weight:500;color:rgba(255,255,255,.55);font-variant-numeric:tabular-nums;', '0:00');
 const hrChip = mk('div', worldTop, 't', `font-size:37px;font-weight:600;color:${COL.ink};background:#fff;border-radius:40px;padding:20px 30px 20px 30px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>אנחנו איתכם — גם בוועדה.</span>');
 hrChip.insertBefore(icon(hrChip, 'pin', 36, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), hrChip.firstChild);
-const HERO = { t0: b(45), grab: b(47), rel: b(50), end: b(51), dur: 3.6 };
+const HERO = { t0: b(45), grab: b(47), rel: b(50), end: b(51), dur: 155 / 60 };   // dur: the clip's clean range at 1x
 const wayChip = mk('div', worldTop, 't', `font-size:40px;font-weight:600;color:${COL.ink};background:#fff;border-radius:44px;padding:22px 34px;display:flex;align-items:center;gap:14px;line-height:1;`, '<span>בדרך אליכם</span>');
 wayChip.insertBefore(icon(wayChip, 'pin', 38, COL.navy, 'position:relative;left:auto;top:auto;flex:none;'), wayChip.firstChild);
 
@@ -445,7 +445,7 @@ function buildTimeline() {
   curTo(b(46.1), HR_TRACK.x1 - pGrab * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .42, .92);
   click(HERO.grab, 'grab');
   curTo(HERO.grab + .08, HR_TRACK.x1 - .08 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .6, .92);
-  curTo(b(48.32), HR_TRACK.x1 - .965 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .62, .92);
+  curTo(b(48.32), HR_TRACK.x1 - .7 * (HR_TRACK.x1 - HR_TRACK.x0), HR_TRACK.y, .62, .92);   // lets it play on after the release
   ev(HERO.grab + .05, 'dragStart', { until: HERO.rel }); ev(HERO.rel, 'release');
   curTo(b(50.2), 1250, 1760, .8, .9);
 
@@ -542,22 +542,32 @@ const toScreen = (c, x, y) => [(x - c.x) * c.z + 540, (y - c.y) * c.z + 960];
 // footage
 // ======================================================================
 const CLIPS = {
-  walk:     { n: 166, fps: 60, w: 1080, h: 1920 },   // all clips motion-interpolated to 60 fps
+  walk:     { n: 169, fps: 60, w: 1080, h: 1920 },   // all clips motion-interpolated to 60 fps
   desk:     { n: 153, fps: 60, w: 720, h: 500 },
-  entrance: { n: 111, fps: 60, w: 720, h: 800 },
-  walkout:  { n: 226, fps: 60, w: 720, h: 800 },
+  entrance: { n: 110, fps: 60, w: 720, h: 800 },
+  walkout:  { n: 225, fps: 60, w: 720, h: 800 },
   talk2:    { n: 231, fps: 60, w: 720, h: 610 },
-  talk3:    { n: 168, fps: 60, w: 720, h: 610 },
+  talk3:    { n: 166, fps: 60, w: 720, h: 610 },
 };
 const clipSrc = (c, i) => `assets/clips/${c}/f${String(i).padStart(3, '0')}.jpg`;
-// segments on the media element; framing: focus (fx, fy) and zoom track k
+// The walk clip holds three shots (cuts at frames 62 and 112). The first plays inside the logo,
+// the second cuts in on b22 as the dive starts, the third lands full frame on the drop (b24).
+const WALK_CUTS = [62, 112];
+function walkFrame(t) {
+  const [c1, c2] = WALK_CUTS;
+  if (t < b(22)) return c1 + Math.floor((t - b(22)) * 60);
+  if (t < b(24)) return c1 + Math.floor((t - b(22)) / (b(24) - b(22)) * (c2 - c1));
+  return c2 + Math.floor((t - b(24)) * 60 * .85);
+}
+// segments on the media element; framing: focus (fx, fy) and zoom track k.
+// lo/hi keep a clip inside one shot (the talk sources punch in at their ends).
 const SEGS = [
-  { t0: b(24) - 112 / 60, t1: b(27), clip: 'walk', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1) },
-  { t0: b(27), t1: b(31), clip: 'desk', f0: 12, rate: 1, fx: .42, fy: .5, k: new Tr(1).to(b(27.2), 1.07, 3.5, 1).jump(b(40), 1) },
-  { t0: b(31), t1: b(35), clip: 'entrance', f0: 0, rate: .95, fx: .5, fy: .4, k: new Tr(1).to(b(31.2), 1.07, 3.5, 1).jump(b(40), 1) },
-  { t0: b(35), t1: b(45), clip: 'talk2', f0: 0, rate: 1, mode: 'pingpong', fx: .54, fy: .56, k: new Tr(1).to(b(39), 1.85, .56, .9).jump(b(47.6), 1) },
-  { t0: b(45), t1: b(51), clip: 'walkout', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1), scrub: true },
-  { t0: b(51), t1: b(60), clip: 'talk3', f0: 0, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
+  { t0: b(24), t1: b(26), clip: 'walk', map: walkFrame, fx: .5, fy: .5, k: new Tr(1) },
+  { t0: b(26), t1: b(31), clip: 'desk', f0: 0, rate: 1, fx: .42, fy: .5, k: new Tr(1).to(b(26.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(31), t1: b(35), clip: 'entrance', f0: 0, rate: .88, fx: .5, fy: .4, k: new Tr(1).to(b(31.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(35), t1: b(45), clip: 'talk2', f0: 4, lo: 4, rate: 1, mode: 'pingpong', fx: .54, fy: .56, k: new Tr(1).to(b(39), 1.85, .56, .9).jump(b(47.6), 1) },
+  { t0: b(45), t1: b(51), clip: 'walkout', hi: 155, fx: .5, fy: .5, k: new Tr(1), scrub: true },
+  { t0: b(51), t1: b(60), clip: 'talk3', f0: 0, hi: 137, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
 ];
 function heroP(t) {
   const tc = CUR_AT(t);
@@ -569,10 +579,12 @@ function heroP(t) {
 }
 function segFrame(seg, t) {
   const c = CLIPS[seg.clip];
-  if (seg.scrub) return Math.round(heroP(t) * (c.n - 1));
+  const lo = seg.lo ?? 0, hi = seg.hi ?? c.n - 1;
+  if (seg.scrub) return lo + Math.round(heroP(t) * (hi - lo));
+  if (seg.map) return clamp(seg.map(t), lo, hi);
   let i = seg.f0 + Math.floor((t - seg.t0) * c.fps * seg.rate);
-  if (seg.mode === 'pingpong') { const p = 2 * (c.n - 1); i = ((i % p) + p) % p; if (i >= c.n) i = p - i; }
-  return clamp(i, 0, c.n - 1);
+  if (seg.mode === 'pingpong') { const p = 2 * (hi - lo); i = ((i - lo) % p + p) % p; if (i > hi - lo) i = p - i; i += lo; }
+  return clamp(i, lo, hi);
 }
 function segAt(t) { for (let i = 0; i < SEGS.length; i++) if (t >= SEGS[i].t0 && t < SEGS[i].t1) return i; return -1; }
 function frameImg(img, seg, t, w, h) {
@@ -890,7 +902,7 @@ async function seek(tIn) {
       box(hrKnob, kx, y, 30 * gs, 30 * gs, 15 * gs);
       hrPause.style.visibility = 'visible'; hrPause.style.opacity = Vc.v;
       hrPause.style.transform = `translate(${(956 - 20)}px,${(y - 20)}px)`;
-      const secs = 14 + p * 3.6 * 1.0;
+      const secs = 14 + p * HERO.dur;
       hrTime.textContent = `0:${String(Math.floor(secs)).padStart(2, '0')}`;
       place(hrTime, 118, y, Vc, { anchor: 'l', dy: 12, blur: 6 });
     } else { [hrTrack, hrFill, hrKnob].forEach(hide); hrPause.style.visibility = 'hidden'; hide(hrTime); }
@@ -1011,7 +1023,7 @@ async function seek(tIn) {
         im.style.opacity = al;
         im.style.filter = al < 1 ? `blur(${((1 - al) * 7).toFixed(2)}px)` : 'none';
       });
-      place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(25), b(27), .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
+      place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(24.5), b(26) + .15, .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
       const Vi = vis(t, CALL.rel, b(69), .22, .14);
       if (Vi.v > .003) { showEl(mIcon); mIcon.style.opacity = Vi.v; mIconSvg.style.transform = `translate(-50%,-50%) scale(${(.6 + .4 * Vi.v).toFixed(4)})`; } else hide(mIcon);
     }
