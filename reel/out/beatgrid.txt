@@ -1,5 +1,5 @@
 measured tempo 119.99 BPM, first beat phase 5.0 ms (0 = starts on a downbeat)
-loudness estimate -13.5 LUFS, peak -5.52 dBFS
+loudness estimate -13.5 LUFS, peak -5.51 dBFS
 UI sounds (event time s, type, peak offset ms):
     0.000  click      peak@2.3 ms
     0.000  whoosh     peak@310.0 ms
