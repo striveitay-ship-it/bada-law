@@ -33,9 +33,9 @@ html,body{margin:0;padding:0;background:var(--canvas);}
 (() => {
 'use strict';
 // ======================================================================
-// Time grid: 100 BPM, 72 beats, 43.2 s. The last frame flows into the first.
+// Time grid: 120 BPM, 72 beats, 36 s. The last frame flows into the first.
 // ======================================================================
-const BPM = 100, BEAT = 60 / BPM, NB = 72, T = NB * BEAT;
+const BPM = 120, BEAT = 60 / BPM, NB = 72, T = NB * BEAT;
 const b = n => n * BEAT;
 const COL = { canvas:'#E9E8E4', ink:'#0B0D11', navy:'#2C3A52', slate:'#556886', silver:'#C4CAD3', mute:'#6B717C', white:'#FFFFFF', line:'#DEDDD8' };
 
@@ -60,11 +60,12 @@ function S(tau, resp, damp) {
 // A value whose target changes many times = sum of one spring per change.
 // Each change also contributes from the previous loop, so the function is periodic in T.
 const TRACKS = [];
-const SOFT = 1.12;   // global spring softness (response multiplier)
-const VS = 1.15;     // global text enter/exit duration multiplier
+const SOFT = 1.0;    // global spring softness (response multiplier)
+const DAMP = .92;    // damping floor: everything glides into place, no wobble
+const VS = 1.3;      // global text enter/exit duration multiplier
 class Tr {
   constructor(v0, resp = .5, damp = .86, name = '') { this.v0 = v0; this.last = v0; this.ev = []; this.r = resp; this.d = damp; this.name = name; TRACKS.push(this); }
-  to(t, v, r = this.r, d = this.d) { const dv = v - this.last; if (Math.abs(dv) > 1e-9) this.ev.push([t, dv, r * SOFT, d]); this.last = v; return this; }
+  to(t, v, r = this.r, d = this.d) { const dv = v - this.last; if (Math.abs(dv) > 1e-9) this.ev.push([t, dv, r * SOFT, r > 0 ? Math.max(d, DAMP) : d]); this.last = v; return this; }
   jump(t, v) { return this.to(t, v, 0, 1); }
   at(t) { let v = this.v0; for (const e of this.ev) v += e[1] * (S(t - e[0], e[2], e[3]) + S(t - e[0] + T, e[2], e[3])); return v; }
 }
@@ -380,7 +381,7 @@ function buildTimeline() {
     camTo(q.t, 540, 905, Math.min(1.5, 960 / w), i ? .55 : .75, .9);
     if (i) ev(q.t, 'pop');
   });
-  ev(b(1), 'tick'); ev(b(3), 'shake'); ev(b(5), 'flip');
+  ev(b(3), 'xdraw'); ev(b(5), 'flip');
   curTo(b(0.35), 1350, 1450, .8, .9);
 
   // --- ACT 2
@@ -513,7 +514,12 @@ const CT_LAYOUT = { logo: 585, logoS: 230, name: 781, sub: 861, div: 918, lead: 
 // ======================================================================
 // camera (with the dive override)
 // ======================================================================
-function camBase(t) { return { x: CAM.x.at(t), y: CAM.y.at(t), z: Math.exp(CAM.lz.at(t)) }; }
+function drift(t) {
+  const w = p => 2 * Math.PI * t / p;                 // periods divide T, so the loop stays seamless
+  const quiet = 1 - c01((t - b(23.2)) / .3) * (1 - c01((t - b(26.4)) / .4));   // hold still while the footage is full frame
+  return { dz: .014 * (.5 + .5 * Math.sin(w(4) - 1.2)) * quiet, dx: 5 * Math.sin(w(12) + .7) * quiet, dy: 4 * Math.sin(w(9)) * quiet };
+}
+function camBase(t) { const d = drift(t); return { x: CAM.x.at(t) + d.dx, y: CAM.y.at(t) + d.dy, z: Math.exp(CAM.lz.at(t)) * (1 + d.dz) }; }
 function logoWorldPoint(t, u, v) { const x = LP.x.at(t), y = LP.y.at(t), s = LP.s.at(t); return [x + (u / 1254 - .5) * s, y + (v / 1254 - .5) * s]; }
 function camera(t) {
   const t0 = b(22), t1 = b(24);
@@ -536,19 +542,19 @@ const toScreen = (c, x, y) => [(x - c.x) * c.z + 540, (y - c.y) * c.z + 960];
 // footage
 // ======================================================================
 const CLIPS = {
-  walk:     { n: 101, fps: 60, w: 1080, h: 1920 },   // motion-interpolated to 60 fps for the slow-mo
-  desk:     { n: 78, fps: 30, w: 720, h: 500 },
-  entrance: { n: 45, fps: 24, w: 720, h: 800 },
-  walkout:  { n: 87, fps: 24, w: 720, h: 800 },
-  talk2:    { n: 98, fps: 25, w: 720, h: 610 },
-  talk3:    { n: 73, fps: 25, w: 720, h: 610 },
+  walk:     { n: 166, fps: 60, w: 1080, h: 1920 },   // all clips motion-interpolated to 60 fps
+  desk:     { n: 153, fps: 60, w: 720, h: 500 },
+  entrance: { n: 111, fps: 60, w: 720, h: 800 },
+  walkout:  { n: 226, fps: 60, w: 720, h: 800 },
+  talk2:    { n: 231, fps: 60, w: 720, h: 610 },
+  talk3:    { n: 168, fps: 60, w: 720, h: 610 },
 };
 const clipSrc = (c, i) => `assets/clips/${c}/f${String(i).padStart(3, '0')}.jpg`;
 // segments on the media element; framing: focus (fx, fy) and zoom track k
 const SEGS = [
-  { t0: b(20), t1: b(27), clip: 'walk', f0: 0, rate: .4, fx: .5, fy: .5, k: new Tr(1) },
-  { t0: b(27), t1: b(31), clip: 'desk', f0: 4, rate: 1, fx: .42, fy: .5, k: new Tr(1).to(b(27.2), 1.07, 3.5, 1).jump(b(40), 1) },
-  { t0: b(31), t1: b(35), clip: 'entrance', f0: 0, rate: .75, fx: .5, fy: .4, k: new Tr(1).to(b(31.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(24) - 112 / 60, t1: b(27), clip: 'walk', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1) },
+  { t0: b(27), t1: b(31), clip: 'desk', f0: 12, rate: 1, fx: .42, fy: .5, k: new Tr(1).to(b(27.2), 1.07, 3.5, 1).jump(b(40), 1) },
+  { t0: b(31), t1: b(35), clip: 'entrance', f0: 0, rate: .95, fx: .5, fy: .4, k: new Tr(1).to(b(31.2), 1.07, 3.5, 1).jump(b(40), 1) },
   { t0: b(35), t1: b(45), clip: 'talk2', f0: 0, rate: 1, mode: 'pingpong', fx: .54, fy: .56, k: new Tr(1).to(b(39), 1.85, .56, .9).jump(b(47.6), 1) },
   { t0: b(45), t1: b(51), clip: 'walkout', f0: 0, rate: 1, fx: .5, fy: .5, k: new Tr(1), scrub: true },
   { t0: b(51), t1: b(60), clip: 'talk3', f0: 0, rate: 1, fx: .63, fy: .56, k: new Tr(1.6), mode: 'pingpong' },
@@ -588,8 +594,8 @@ function place(el, x, y, V, o = {}) {
   const v = V.v;
   if (v < 0.003) { if (el._v !== 0) { el.style.visibility = 'hidden'; el._v = 0; } return false; }
   if (el._v !== 1) { el.style.visibility = 'visible'; el._v = 1; }
-  const dy = (1 - v) * (V.s > 0 ? (o.dy ?? 22) : -(o.dyOut ?? 12));
-  const bl = (1 - v) * (o.blur ?? 12);
+  const dy = (1 - v) * (V.s > 0 ? (o.dy ?? 22) * 1.15 : -(o.dyOut ?? 12));
+  const bl = (1 - v) * Math.min(o.blur ?? 12, 5);
   const sc = (o.sc ?? 1) * (o.scale ? 1 - (1 - v) * o.scale : 1);
   const anchor = o.anchor ?? 'r';   // r = right edge (RTL), c = centre, l = left edge
   const ax = anchor === 'r' ? '-100%' : anchor === 'c' ? '-50%' : '0%';
@@ -650,7 +656,6 @@ async function seek(tIn) {
   // ---------- shape ----------
   let sx = SH.x.at(t), sy = SH.y.at(t), sw = Math.max(0, SH.w.at(t)), sh = Math.max(0, SH.h.at(t)), sr = Math.max(0, SH.r.at(t));
   // rejection shake on b3
-  { const d = since(t, b(3)); if (d < .6) sx += 13 * Math.sin(2 * Math.PI * 8.5 * d) * Math.exp(-d / .11); }
   let ssc = SC.at(t);
   for (const tc of [b(0)]) ssc += pulse(t, tc, -.05);
   const sLeft = sx - sw / 2, sTop = sy - sh / 2;
@@ -681,7 +686,6 @@ async function seek(tIn) {
           const d = since(t, q.t);
           drawIcon(q.ic, (d - .04) / .36, q.icon === 'filex' ? 'path:not(.x)' : 'path,rect,circle');
           let tr = '';
-          if (q.icon === 'car') { const k = since(t, b(1)); const a = k < 1 ? -9 * Math.exp(-k / .09) * Math.cos(2 * Math.PI * 4 * k) * (k > 0 ? 1 : 0) : 0; tr = `rotate(${a.toFixed(2)}deg) translateX(${(a * .5).toFixed(2)}px)`; }
           if (q.icon === 'filex') drawIcon(q.ic, (since(t, b(3)) < 1.2 ? since(t, b(3)) : -1) / .22, 'path.x');
           if (q.icon === 'hourglass') { const r = 180 * S(since(t, b(5)) < 1.2 ? since(t, b(5)) : 0, .42, .82); tr = `rotate(${r.toFixed(2)}deg)`; }
           q.ic.style.transform = tr; q.ic.style.transformOrigin = '50% 50%';
@@ -996,7 +1000,7 @@ async function seek(tIn) {
       let bottom = null, top = null, a = 1;
       if (si >= 0) {
         const seg = SEGS[si];
-        a = c01((t - seg.t0) / .2);
+        a = eOut3(c01((t - seg.t0) / .32));
         if (si > 0 && a < 1) { bottom = SEGS[si - 1]; top = seg; } else bottom = seg;
       }
       [[mImg[0], bottom, 1], [mImg[1], top, a]].forEach(([im, seg, al]) => {
@@ -1005,7 +1009,7 @@ async function seek(tIn) {
         frameImg(im, seg, t, mw, mh);
         pending.add(im);
         im.style.opacity = al;
-        im.style.filter = al < 1 ? `blur(${((1 - al) * 14).toFixed(2)}px)` : 'none';
+        im.style.filter = al < 1 ? `blur(${((1 - al) * 7).toFixed(2)}px)` : 'none';
       });
       place(wayChip, mx, Math.min(my + mh / 2 - 96, 1390), vis(t, b(25), b(27), .32, .14), { anchor: 'c', dy: 18, blur: 10, scale: .08 });
       const Vi = vis(t, CALL.rel, b(69), .22, .14);

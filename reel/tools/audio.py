@@ -1,21 +1,20 @@
-"""Original soundtrack + UI sound design for the bada.law reel (v2).
+"""Original soundtrack + UI sound design for the bada.law reel (v3).
 
     python3 tools/audio.py out/events.json out/
 
-100 BPM, F minor, 18 bars = 43.2 s, loops seamlessly (two passes are rendered and
-the second one is kept, so tails from the end of the loop already sound at its start).
+120 BPM, F minor, 18 bars = 36 s, loops seamlessly (two passes are rendered and the
+second one is kept, so tails from the end of the loop already sound at its start).
 Everything is synthesized here, so there are no licensing questions.
 
-Arrangement follows the picture:
-  b0-5   hook groove + a notification motif on the three questions, then a tape stop
-  b6-11  "אתם / לא / לבד." - toms, an impact and a vocal-pad chord, heartbeat kicks
-  b12-19 logo build: metal hits on the pieces, filtered drums opening up, snare roll
-  b20-23 footage fills the logo, riser, drums drop out for the dive
-  b24-43 drop: 808 with glides, hook melody, vocal chops, check tones on the checklist
+One continuous afro-house groove that never stops - the arrangement moves with filters:
+  b0-5   groove + a notification motif on the three questions
+  b6-11  the whole groove sinks under a low-pass ("underwater") for "אתם / לא / לבד.",
+         with toms, an impact and a vocal chord on top
+  b12-23 the filter opens while the logo builds; kalimba arpeggio, riser, a short air pocket
+  b24-43 drop: flute hook, congas, open hats, rolling bass
   b44-50 player: the soundtrack is scrubbed along with the video while it is dragged
-  b51-55 breakdown under the quote: Rhodes, vocal pad
-  b56-59 build on the slide-to-call (the knob drag has its own rising zip)
-  b60-71 second drop on the contact card, odometer ticks on the rolling number
+  b51-55 the groove softens under the quote, flute
+  b56-71 build on the slide-to-call, second drop on the contact card, back into the loop
 
 Writes music.wav (score), sfx.wav (UI sounds), mix.wav (mastered) and beatgrid.txt.
 """
@@ -28,14 +27,14 @@ from scipy import signal
 from scipy.ndimage import maximum_filter1d
 
 SR = 48000
-BPM = 100
+BPM = 120
 BEAT = 60 / BPM
 STEP = BEAT / 4
 NB = 72
 T = NB * BEAT
 LOOPS = 2
 N = int(SR * (T * (LOOPS + 1)))
-SWING = .018
+SWING = .014
 rng = np.random.default_rng(11)
 
 
@@ -160,21 +159,6 @@ def noise_swell(dur, f0, f1, level=1.0, shape='rise', width=.5):
 
 
 # ---------------------------------------------------------------- instruments
-def kick(level=1.0):
-    t = tt(.42)
-    f = 52 + 128 * np.exp(-t / .026)
-    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .22) * np.minimum(1, t / .0012)
-    click = hp(rng.standard_normal(len(t)), 2500) * np.exp(-t / .0035)
-    return np.tanh(1.9 * (body + .18 * click)) * level
-
-
-def soft_kick(level=.6):
-    t = tt(.45)
-    f = 44 + 60 * np.exp(-t / .05)
-    x = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .24) * np.minimum(1, t / .004)
-    return np.tanh(1.2 * x) * level
-
-
 def snare(level=1.0):
     t = tt(.4)
     tone = (np.sin(2 * np.pi * 185 * t) * .8 + np.sin(2 * np.pi * 330 * t) * .4) * np.exp(-t / .06)
@@ -220,30 +204,6 @@ def tom(level=1.0, f=90):
     return np.tanh(1.5 * x) * level
 
 
-def bass808(m, dur, level=1.0, glide_to=None, glide=.09):
-    """808-style bass: sine + controlled drive (so phone speakers hear the harmonics), optional glide."""
-    t = tt(dur + .06)
-    f = np.full(len(t), mf(m))
-    if glide_to is not None:
-        g0 = max(0.0, dur - glide)
-        u = np.clip((t - g0) / glide, 0, 1)
-        f = mf(m) * (mf(glide_to) / mf(m)) ** (u * u * (3 - 2 * u))
-    ph = 2 * np.pi * np.cumsum(f) / SR
-    x = np.sin(ph) + .12 * np.sin(2 * ph)
-    env = env_ar(len(t), .005, .05, hold=dur)
-    return np.tanh(2.2 * x * env) * level
-
-
-def ep(m, dur, level=1.0, bright=1.0):
-    t = tt(dur + 1.2)
-    f = mf(m)
-    idx = (2.0 * bright) * np.exp(-t / .16) + .3
-    x = np.sin(2 * np.pi * f * t + idx * np.sin(2 * np.pi * f * t))
-    x += np.sin(2 * np.pi * f * 14 * t) * np.exp(-t / .02) * .1 * bright
-    env = np.minimum(1, t / .002) * np.exp(-t / 1.2) * np.where(t > dur, np.exp(-(t - dur) / .16), 1)
-    return x * env * level
-
-
 def pad(ms, dur, level=1.0, cutoff=1800, attack=.08, release=.6, seed=0):
     r = np.random.default_rng(seed)
     t = tt(dur + release * 4)
@@ -255,15 +215,6 @@ def pad(ms, dur, level=1.0, cutoff=1800, attack=.08, release=.6, seed=0):
                 out[:, c] += saw(mf(m) * 2 ** (d / 12), t, r.uniform())
     out = lp(out / (len(ms) * 5) ** .5, cutoff)
     return out * env_ar(len(t), attack, release, hold=dur)[:, None] * level
-
-
-def pluck(m, dur=.4, level=1.0, bright=1.0):
-    t = tt(dur + .7)
-    f = mf(m)
-    s = saw(f, t) * .55 + saw(f * 2.003, t, .2) * .22 + np.sin(2 * np.pi * f * t) * .45
-    ef = np.exp(-t / (.07 * bright))
-    y = ef * lp(s, 6500) + (1 - ef) * lp(s, 1000)
-    return y * np.minimum(1, t / .002) * np.exp(-t / .32) * level
 
 
 def bell(m, level=1.0, decay=1.2, ratio=3.5):
@@ -322,251 +273,229 @@ def reverse_crash(dur):
     return crash()[:n][::-1] * np.linspace(0, 1, n)[:, None] ** 1.5
 
 
-# ---------------------------------------------------------------- the score
+# ---------------------------------------------------------------- instruments (v3)
+def kick(level=1.0):
+    """round afro-house kick"""
+    t = tt(.5)
+    f = 47 + 95 * np.exp(-t / .03)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .27) * np.minimum(1, t / .002)
+    click = hp(rng.standard_normal(len(t)), 3000) * np.exp(-t / .0022) * .12
+    return np.tanh(1.6 * (body + click)) * level
+
+
+def conga(hz, level=1.0, slap=False):
+    t = tt(.4)
+    f = hz * (1 + .22 * np.exp(-t / .012))
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (.07 if slap else .17))
+    nz = bp(rng.standard_normal(len(t)), 1500, 6000) * np.exp(-t / .008) * (.6 if slap else .18)
+    return (body + nz) * np.minimum(1, t / .0008) * level
+
+
+def flute(m, dur, level=1.0, prev=None):
+    """breathy flute: sine partials, breath noise, vibrato that blooms, glide from the previous note"""
+    t = tt(dur + .6)
+    f0 = mf(m)
+    if prev is not None:
+        f = f0 * (mf(prev) / f0) ** np.exp(-t / .045)
+    else:
+        f = f0 * 2 ** (-.5 * np.exp(-t / .05) / 12)
+    f = f * (1 + .0055 * np.sin(2 * np.pi * 5.1 * t) * np.clip((t - .14) / .25, 0, 1))
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    tone = np.sin(ph) + .16 * np.sin(2 * ph) + .05 * np.sin(3 * ph)
+    breath = bp(rng.standard_normal(len(t)), f0 * 1.4, min(f0 * 6, 14000)) * .13
+    return (tone * .9 + breath) * env_ar(len(t), .055, .16, hold=dur) * level
+
+
+def kalimba(m, level=1.0):
+    t = tt(1.2)
+    f = mf(m)
+    x = np.sin(2 * np.pi * f * t + 1.6 * np.exp(-t / .03) * np.sin(2 * np.pi * f * 4.1 * t))
+    x += .25 * np.sin(2 * np.pi * f * 5.95 * t) * np.exp(-t / .05)
+    return x * np.minimum(1, t / .001) * np.exp(-t / .45) * level
+
+
+def bass(m, dur, level=1.0):
+    t = tt(dur + .05)
+    ph = 2 * np.pi * mf(m) * t
+    x = np.sin(ph) + .22 * np.sin(2 * ph) + .06 * np.sin(3 * ph)
+    return np.tanh(1.5 * x * env_ar(len(t), .004, .04, hold=dur)) * level
+
+
+def autofilter(x, points):
+    """time-varying low-pass: `points` = [(time s, cutoff Hz)], interpolated in log-frequency, 256-sample blocks."""
+    ts = np.array([p[0] for p in points]); fs = np.log(np.array([p[1] for p in points]))
+    y = np.zeros_like(x)
+    blk = 256
+    state = None
+    for i0 in range(0, len(x), blk):
+        tc = (i0 + blk / 2) / SR
+        fc = float(np.exp(np.interp(tc, ts, fs)))
+        sos = signal.butter(2, min(fc, SR * .45), 'low', fs=SR, output='sos')
+        if state is None:
+            state = np.zeros((sos.shape[0], 2, 2))
+        seg = x[i0:i0 + blk]
+        out, state = signal.sosfilt(sos, seg, axis=0, zi=state)
+        y[i0:i0 + blk] = out
+    return y
+
+
+# ---------------------------------------------------------------- the score (v3)
 def b(n):
     return n * BEAT
 
 
-# chord per half bar (36 entries = 18 bars)
 PROG = ('Fm Fm  Fm Db  Db Db  Bbm Bbm  Eb Eb  Db C  '
         'Fm Fm  Db Db  Ab Ab  Eb Eb  Fm Fm  Db Db  Ab Eb  Db Eb  Bbm C  Fm Fm  Db Eb  Fm Fm').split()
 assert len(PROG) == 36
-CH = {'Fm': ['F3', 'Ab3', 'C4', 'Eb4'], 'Db': ['Db3', 'F3', 'Ab3', 'C4'], 'Ab': ['Eb3', 'Ab3', 'C4', 'G4'],
-      'Eb': ['Eb3', 'G3', 'Bb3', 'F4'], 'Bbm': ['Db3', 'F3', 'Ab3', 'C4'], 'C': ['E3', 'G3', 'Bb3', 'Db4']}
+CH = {'Fm': ['F3', 'Ab3', 'C4', 'Eb4', 'G4'], 'Db': ['Db3', 'F3', 'Ab3', 'C4', 'Eb4'], 'Ab': ['Eb3', 'Ab3', 'C4', 'G4', 'Bb4'],
+      'Eb': ['Eb3', 'G3', 'Bb3', 'F4', 'C5'], 'Bbm': ['Db3', 'F3', 'Ab3', 'C4', 'Eb4'], 'C': ['E3', 'G3', 'Bb3', 'Db4', 'F4']}
 ROOT = {'Fm': 'F1', 'Db': 'Db2', 'Ab': 'Ab1', 'Eb': 'Eb2', 'Bbm': 'Bb1', 'C': 'C2'}
-VOXT = {'Fm': ['Ab4', 'C5', 'F5'], 'Db': ['F4', 'Ab4', 'Db5'], 'Ab': ['C5', 'Eb5', 'Ab5'], 'Eb': ['G4', 'Bb4', 'Eb5'],
-        'Bbm': ['F4', 'Bb4', 'Db5'], 'C': ['G4', 'Bb4', 'E5']}
-# hook melody over Fm | Db | Ab | Eb as (16th step, note, length in steps)
-HOOK = [(0, 'C5', 2), (2, 'Eb5', 2), (4, 'F5', 3), (7, 'Eb5', 1), (8, 'F5', 2), (10, 'Ab5', 4), (14, 'G5', 2),
-        (16, 'F5', 4), (20, 'Eb5', 2), (22, 'C5', 6), (28, 'Ab4', 2), (30, 'Bb4', 2),
-        (32, 'C5', 2), (34, 'Eb5', 2), (36, 'Ab5', 3), (39, 'G5', 1), (40, 'Eb5', 4), (44, 'C5', 2), (46, 'Eb5', 2),
-        (48, 'G5', 6), (54, 'F5', 2), (56, 'Eb5', 4), (60, 'Bb4', 2), (62, 'C5', 2)]
-GROOVES = {'hook': ('x.........x.....', '....x.......x...', '..x...x...x...x.'),
-           'drop': (None, '....x.......x...', 'x.x.x.x.x.x.x.xx'),
-           'hero': ('x.......x.x.....', '....x.......x...', 'xxxxxxxxxxxxxxxx'),
-           'drop2': (None, '....x.......x...', 'x.x.x.x.x.x.x.xx'),
-           'outro': (None, '....x.......x...', 'x.x.x.x.x.x.x.x.')}
+# flute hook over Fm | Db | Ab | Eb as (16th step, note, length in steps)
+HOOK = [(0, 'C5', 3), (3, 'Eb5', 1), (4, 'F5', 4), (8, 'Ab5', 2), (10, 'G5', 2), (12, 'F5', 4),
+        (16, 'Eb5', 3), (19, 'F5', 1), (20, 'Ab5', 4), (24, 'F5', 2), (26, 'Eb5', 2), (28, 'C5', 4),
+        (32, 'C5', 3), (35, 'Eb5', 1), (36, 'Ab5', 4), (40, 'G5', 2), (42, 'Ab5', 2), (44, 'C6', 4),
+        (48, 'Bb5', 4), (52, 'G5', 2), (54, 'F5', 2), (56, 'Eb5', 6), (62, 'C5', 2)]
+BASSLINE = [(0, 0, 3), (6, 0, 2), (10, 7, 2), (13, 0, 3)]           # (step, interval, length) - rolling
+CONGA_LO, CONGA_HI, CONGA_SLAP = [2, 9], [3, 11, 13, 15], [7]
 
 
 def chord_at(beat):
     return PROG[int(beat // 2) % 36]
 
 
-def section(beat):
-    for end, name in [(6, 'hook'), (8, 'stop'), (12, 'statement'), (20, 'build'), (22, 'fill'), (24, 'dive'),
-                      (44, 'drop'), (51, 'hero'), (56, 'break'), (60, 'rise'), (68, 'drop2'), (72, 'outro')]:
-        if beat % NB < end:
-            return name
-
-
-def pattern(s):
-    return [i for i, ch in enumerate(s.replace(' ', '')) if ch == 'x']
-
-
 def st(t0, step):
-    """time of a 16th step, with swing on the off-16ths"""
     return t0 + step * STEP + (SWING if step % 2 else 0)
 
 
-def tape_stop(x, t0, dur):
-    """slow the bus down to a halt over `dur`, then silence."""
-    i0, n = int(t0 * SR), int(dur * SR)
-    tau = np.cumsum((1 - np.arange(n) / n) ** 1.7)
-    src = x[i0:i0 + n + 1]
-    y = x.copy()
-    u = np.arange(n) / n
-    fade = np.linspace(1, .6, n) * np.where(u > .7, np.cos((u - .7) / .3 * np.pi / 2) ** 2, 1)   # no click at the halt
-    for c in range(2):
-        y[i0:i0 + n, c] = np.interp(tau, np.arange(len(src)), src[:, c]) * fade
-    y[i0 + n:] = 0
-    return y
-
-
 def compose():
-    dry = np.zeros((N, 2)); mus = np.zeros((N, 2)); send = np.zeros((N, 2)); dsend = np.zeros((N, 2)); fx = np.zeros((N, 2))
+    groove = np.zeros((N, 2)); mus = np.zeros((N, 2)); send = np.zeros((N, 2)); dsend = np.zeros((N, 2)); fx = np.zeros((N, 2))
     kicks = []
-    DROP_K, DROP_K2 = pattern('x......x..x.....'), pattern('x......x..x..x..')
     imp = impact()
     for loop in range(LOOPS + 1):
         base = loop * T
-        hook_dry = np.zeros((N, 2)); hook_mus = np.zeros((N, 2))
-        for beat in range(NB):
-            t0 = base + beat * BEAT
-            sec = section(beat)
-            ch = chord_at(beat)
-            bb, bar = beat % 4, beat // 4
+        for bar in range(NB // 4):
             bar0 = base + bar * 4 * BEAT
-            steps = range(bb * 4, bb * 4 + 4)
-            D = hook_dry if sec == 'hook' else dry
-            Mb = hook_mus if sec == 'hook' else mus
-
-            # ---------------- drums
-            if sec in GROOVES:
-                kp, sp, hp_ = GROOVES[sec]
-                kpos = (DROP_K2 if bar % 4 == 3 else DROP_K) if kp is None else pattern(kp)
-                for s in steps:
-                    ts = st(bar0, s)
-                    if s in kpos:
-                        place(D, kick(.95), ts, .78)
-                        kicks.append(ts)
-                    if s in pattern(sp):
-                        place(D, snare(.8), ts, .42, -.03)
-                        place(D, clap(.75), ts + .004, .38, .05)
-                        place(send, clap(.5), ts, .3)
-                    if s in pattern(hp_):
-                        acc = .9 if s % 4 == 2 else (.55 if s % 2 == 0 else .4)
-                        place(D, hat(acc), ts, .3, .22)
-                    if sec in ('drop', 'drop2') and s == 14 and bar % 2 == 1:
-                        place(D, hat(.5, open_=True), ts, .2, .3)
-                    if sec in ('drop', 'drop2', 'hero') and s in (3, 11):
-                        place(D, rim(.6), ts, .16, -.3)
-                    if sec in ('drop', 'drop2'):
-                        place(D, shaker(.7 if s % 2 else .45), ts, .1, -.35)
-                if sec in ('drop', 'drop2') and bar % 4 == 3 and bb == 3:     # hat roll into every 4th bar
-                    for k in range(6):
-                        place(D, hat(.35 + .08 * k), t0 + BEAT / 2 + k * BEAT / 12, .26, .22)
-            if sec == 'build':
-                lvl = .5 + .5 * (beat - 12) / 8
-                place(dry, kick(lvl), t0, .78); kicks.append(t0)
-                if beat >= 16 and bb in (1, 3):
-                    place(dry, snare(.7), t0, .38); place(dry, clap(.6), t0, .32)
-                if beat >= 14:
-                    for s in (1, 2, 3):
-                        place(dry, hat(.25 + .25 * (beat - 14) / 6), st(t0, s), .24, .22)
-                if beat == 19:
-                    for k in range(4):
-                        place(dry, snare(.3 + .15 * k), t0 + k * STEP, .35, (-1) ** k * .1)
-            if sec == 'fill':
-                place(dry, kick(.9), t0, .78); kicks.append(t0)
-                n = 8 if beat == 20 else 12
-                for k in range(n):
-                    place(dry, snare(.25 + .6 * k / n), t0 + k * BEAT / n, .3 + .2 * k / n, (-1) ** k * .12)
-            if beat in (9, 10, 11):
-                place(dry, soft_kick(.7 if beat < 11 else .5), t0, .9)
-            if sec == 'break' and bb in (1, 3):
-                place(dry, rim(.5), t0, .2, .2)
-                place(dry, clap(.3), t0 + .002, .14, -.2)
-            if sec == 'rise':
-                place(dry, kick(.85), t0, .78); kicks.append(t0)
-                n = 2 if beat < 58 else 4
-                for k in range(n):
-                    place(dry, snare(.35 + .5 * ((beat - 56) * n + k) / (4 * n)), t0 + k * BEAT / n, .36, (-1) ** k * .1)
-            if beat == 71:
-                for k in range(3):
-                    place(dry, snare(.4 + .15 * k), t0 + BEAT / 2 + k * STEP * .66, .3)
-
-            # ---------------- 808
-            if sec in ('hook', 'drop', 'hero', 'drop2', 'outro') or (sec == 'build' and beat >= 16):
-                if beat % 2 == 0:
-                    r = midi(ROOT[ch])
-                    nxt = midi(ROOT[chord_at(beat + 2)])
-                    lv = .95 if sec != 'build' else .7
-                    place(Mb, bass808(r, STEP * 5, lv), t0, .62)
-                    hi = 12 if bar % 2 else 0
-                    place(Mb, bass808(r + hi, STEP * 2.6, lv * .85, glide_to=(nxt + hi) if nxt != r else None, glide=.08), st(t0, 6), .5)
-            if sec == 'break' and beat % 2 == 0:
-                place(mus, bass808(midi(ROOT[ch]), BEAT * 1.8, .55), t0, .5)
-            if sec == 'rise':
-                place(mus, bass808(midi(ROOT[ch]), BEAT * .8, .8), t0, .55)
-
-            # ---------------- harmony
-            if beat % 2 == 0:
+            beat0 = bar * 4
+            air = beat0 == 20   # b22-23: a short air pocket before the drop
+            full = (24 <= beat0 < 44) or (60 <= beat0 < 72) or beat0 < 8
+            for s in range(16):
+                beat = beat0 + s / 4
+                ts = st(bar0, s)
+                if air and beat >= 22:
+                    continue
+                if s % 4 == 0:
+                    place(groove, kick(.95), ts, .78); kicks.append(ts)
+                if s in (4, 12):
+                    place(groove, clap(.55), ts, .3, .05); place(send, clap(.5), ts, .35)
+                if s in (2, 6, 10, 14):
+                    place(groove, hat(.55, open_=full), ts, .2 if full else .26, .25)
+                place(groove, shaker(.8 if s % 2 else .45), ts, .12, -.35)
+                if s in CONGA_LO:
+                    place(groove, conga(196, .7), ts, .3, -.3)
+                if s in CONGA_HI:
+                    place(groove, conga(294, .55), ts, .26, .35)
+                if s in CONGA_SLAP:
+                    place(groove, conga(330, .6, slap=True), ts, .24, .4)
+                if s in (5, 13):
+                    place(groove, rim(.45), ts, .12, -.2)
+            # rolling bass (per half bar chord)
+            for half in (0, 1):
+                ch = chord_at(beat0 + 2 * half)
+                r = midi(ROOT[ch])
+                for (s0, iv, ln) in BASSLINE:
+                    if (s0 < 8) == (half == 0):
+                        if air and beat0 + s0 / 4 >= 22:
+                            continue
+                        place(groove, bass(r + iv, ln * STEP * .9, .9), st(bar0, s0), .5)
+            # pads (warm, long) + kalimba stabs
+            for half in (0, 1):
+                beat = beat0 + 2 * half
+                ch = chord_at(beat)
                 notes = [midi(n) for n in CH[ch]]
-                if sec in ('drop', 'drop2', 'hero', 'outro', 'hook'):
-                    place(Mb, pad(notes, BEAT * 2, .3, 1600 if sec != 'hook' else 1100, .06, .5, seed=beat), t0, .3 if sec == 'hook' else .34)
-                    if sec != 'hook':
-                        for off in (2, 6):  # Rhodes stabs on the off-beats
-                            for k, n in enumerate(notes):
-                                place(Mb, ep(n + 12, STEP * 1.6, .16, .8), st(t0, off) + k * .004, .5, (k - 1.5) * .25)
-                                place(send, ep(n + 12, STEP * 1.6, .1, .8), st(t0, off), .2)
-                elif sec in ('stop', 'statement'):
-                    pv = pad(notes, BEAT * 2, .45, 900 if sec == 'stop' else 1500, .3, 1.0, seed=beat + 5)
-                    place(mus, pv, t0, .34); place(send, pv, t0, .3)
-                    if beat == 8:   # "לבד." - a wide vocal chord on Db
-                        for k, (n, v) in enumerate([('Db4', 'a'), ('F4', 'a'), ('Ab4', 'o'), ('Db5', 'a')]):
-                            x = vox(midi(n), BEAT * 3.6, v, .5, scoop=False, attack=.06, release=.5)
-                            place(mus, x, t0, .45, (k - 1.5) * .45); place(send, x, t0, .5)
-                elif sec == 'build':
-                    pv = pad(notes, BEAT * 2, .42, 700 + 2600 * (beat - 12) / 8, .05, .4, seed=beat)
-                    place(mus, pv, t0, .34); place(send, pv, t0, .2)
-                    for s in range(8):   # rising arpeggio while the logo assembles
-                        n = notes[s % 4] + 12 + (12 if s >= 4 else 0)
-                        place(mus, pluck(n, STEP, .22 + .02 * (beat - 12), .7), st(t0, s), .36, .3 * (-1) ** s)
-                        place(dsend, pluck(n, STEP, .18, .7), st(t0, s), .2)
-                elif sec in ('fill', 'dive'):
-                    pv = pad(notes, BEAT * 2, .4, 2400 if sec == 'fill' else 900, .05, .8, seed=beat)
-                    place(mus, pv, t0, .3); place(send, pv, t0, .3)
-                elif sec == 'break':
-                    for k, n in enumerate(notes):
-                        place(mus, ep(n, BEAT * 1.9, .2), t0 + k * .014, .62, (k - 1.5) * .25)
-                        place(send, ep(n, BEAT * 1.9, .16), t0 + k * .014, .45)
-                    x = vox(notes[2] + 12, BEAT * 1.9, 'o', .35, scoop=False, attack=.18, release=.4)
-                    place(mus, x, t0, .32, .1); place(send, x, t0, .45)
-                elif sec == 'rise':
-                    place(mus, pad(notes, BEAT * 2, .4, 800 + 2000 * (beat - 56) / 4, .02, .3, seed=beat), t0, .32)
+                pv = pad(notes, BEAT * 2, .32, 1500, .12, .9, seed=beat)
+                place(mus, pv, b(beat) + base, .34); place(send, pv, b(beat) + base, .25)
+                if full or 12 <= beat0 < 24 or 44 <= beat0 < 52:
+                    for k, s0 in enumerate((2, 6)):
+                        for j, n in enumerate(notes[1:4]):
+                            place(mus, kalimba(n + 12, .28), st(b(beat) + base, s0) + j * .006, .42, (j - 1) * .3)
+                            place(dsend, kalimba(n + 12, .2), st(b(beat) + base, s0), .18)
+            # logo build: rising kalimba arpeggio
+            if 12 <= beat0 < 20:
+                for s in range(16):
+                    ch = chord_at(beat0 + s // 4)
+                    notes = [midi(n) + 12 for n in CH[ch][:4]]
+                    n = notes[s % 4] + (12 if s >= 8 else 0)
+                    place(mus, kalimba(n, .22 + .012 * (beat0 - 12)), st(bar0, s), .4, .3 * (-1) ** s)
+                    place(dsend, kalimba(n, .18), st(bar0, s), .2)
+            if 44 <= beat0 < 52:   # player: gentle 16th arpeggio
+                for s in range(16):
+                    ch = chord_at(beat0 + s // 4)
+                    notes = [midi(n) + 12 for n in CH[ch][:4]]
+                    place(mus, kalimba(notes[[0, 2, 1, 3][s % 4]], .2), st(bar0, s), .36, .3 * (-1) ** s)
 
-            # ---------------- melody
-            if sec in ('drop', 'drop2', 'outro'):
-                if sec == 'drop':
-                    phrase, use, octave = (beat - 24) * 4, beat < 40, 0
-                elif sec == 'drop2':
-                    phrase, use, octave = (beat - 60) * 4, True, 12
-                else:
-                    phrase, use, octave = 32 + (beat - 68) * 4, True, 0
-                if use:
-                    for (s0, n, ln) in HOOK:
-                        if phrase <= s0 < phrase + 4:
-                            tn = st(t0, s0 - phrase)
-                            x = pluck(midi(n) + octave, ln * STEP, .55 if octave == 0 else .42)
-                            place(mus, x, tn, .56, .08); place(dsend, x, tn, .32); place(send, x, tn, .18)
-                            if octave:
-                                place(mus, bell(midi(n) + octave, .12, .5), tn, .5, -.2)
-            if (32 <= beat < 44) or (sec == 'drop2' and bar % 2 == 1):   # vocal chops answer the melody
-                tones = VOXT[ch]
-                for s, idx, vw, ln in [(2, 0, 'o', 2), (4, 1, 'a', 3), (14, 2, 'a', 2)]:
-                    if s // 4 == bb:
-                        x = vox(midi(tones[idx]), STEP * ln, vw, .42)
-                        place(mus, x, st(bar0, s), .42, .25 * (idx - 1))
-                        place(send, x, st(bar0, s), .3); place(dsend, x, st(bar0, s), .18)
-            if sec == 'hero':   # arpeggios under the player
-                notes = [midi(n) + 12 for n in CH[ch]]
-                for s in range(4):
-                    n = notes[[0, 2, 1, 3][s]]
-                    place(mus, pluck(n, STEP, .3, .6), st(t0, s), .36, .35 * (-1) ** s)
-                    place(dsend, pluck(n, STEP, .25, .6), st(t0, s), .16)
-            if sec == 'break':
-                mel = {52: ('Ab5', 1.0), 53: ('F5', .5), 54: ('Eb5', 1.0), 55: ('F5', 1.0)}
-                if beat in mel:
-                    n, ln = mel[beat]
-                    x = ep(midi(n), BEAT * ln, .42, 1.3)
-                    place(mus, x, t0, .55, .15); place(send, x, t0, .5)
-            if beat in (0, 2, 4):   # notification motif on the three questions
-                top = {0: 'F6', 2: 'G6', 4: 'Ab6'}[beat]
-                place(hook_mus, bell(midi('C6'), .35, .5), t0, .42, .2)
-                place(hook_mus, bell(midi(top), .35, .6), t0 + STEP, .42, .25)
-                place(send, bell(midi(top), .35, .6), t0 + STEP, .4)
+        # ---------------- flute
+        def play_hook(start_beat, first_step, last_step, octave=0, level=.5, harmony=False):
+            prev = None
+            for (s0, n, ln) in HOOK:
+                if first_step <= s0 < last_step:
+                    tn = base + b(start_beat) + (s0 - first_step) * STEP + (SWING if s0 % 2 else 0)
+                    m = midi(n) + octave
+                    x = flute(m, ln * STEP * .95, level, prev)
+                    place(mus, x, tn, .6, .05); place(send, x, tn, .35); place(dsend, x, tn, .25)
+                    if harmony:
+                        pcs = {midi(c) % 12 for c in CH[chord_at(start_beat + (s0 - first_step) / 4)]}
+                        hm = next((m - d for d in (3, 4, 5) if (m - d) % 12 in pcs), m - 5)
+                        h = flute(hm, ln * STEP * .95, level * .55, None)
+                        place(mus, h, tn, .5, -.25); place(send, h, tn, .3)
+                    prev = m
+        play_hook(24, 0, 64)                              # drop: the full 4-bar hook
+        play_hook(60, 0, 32, level=.55, harmony=True)     # second drop: first half with a harmony
+        play_hook(68, 32, 48, level=.4)                   # outro
+        for bt, n, ln in ((52, 'Ab5', 2), (54, 'F5', 1), (55, 'Eb5', 1)):   # under the quote
+            x = flute(midi(n), BEAT * ln * .95, .38)
+            place(mus, x, base + b(bt), .6); place(send, x, base + b(bt), .5)
+        # notification motif on the three questions
+        for bt, top in ((0, 'F6'), (2, 'G6'), (4, 'Ab6')):
+            place(mus, bell(midi('C6'), .3, .5), base + b(bt), .36, .2)
+            place(mus, bell(midi(top), .3, .6), base + b(bt) + STEP, .36, .25)
+            place(send, bell(midi(top), .3, .6), base + b(bt) + STEP, .35)
+        # second drop: a few vocal colours
+        for bt, n, v in ((60.5, 'Ab4', 'o'), (61, 'C5', 'a'), (63.5, 'Eb5', 'a'), (64.5, 'F4', 'o'), (65, 'Ab4', 'a')):
+            x = vox(midi(n), STEP * 2.5, v, .32)
+            place(mus, x, base + b(bt), .36, .2); place(send, x, base + b(bt), .3)
 
-        # the hook groove powers down into "אתם"
-        dry += tape_stop(hook_dry, base + b(5.25), .75 * BEAT)
-        mus += tape_stop(hook_mus, base + b(5.25), .75 * BEAT)
+        # ---------------- statement + transitions (not filtered)
+        place(fx, tom(1.0, 87.3), base + b(6), .7)
+        place(fx, tom(1.0, 77.8), base + b(7), .75)
+        place(fx, imp, base + b(8), .9); place(send, imp, base + b(8), .45)
+        for k, (n, v) in enumerate([('Db4', 'a'), ('F4', 'a'), ('Ab4', 'o'), ('Db5', 'a')]):
+            x = vox(midi(n), BEAT * 5.5, v, .45, scoop=False, attack=.08, release=.6)
+            place(fx, x, base + b(8), .42, (k - 1.5) * .45); place(send, x, base + b(8), .5)
+        place(fx, noise_swell(BEAT * 4, 400, 9000, .8, 'rise', .45), base + b(19.5), .26)   # into the drop
+        place(fx, reverse_crash(BEAT * 2), base + b(22), .55)
+        for k in range(8):                                   # snare roll into the drop
+            place(fx, snare(.25 + .5 * k / 8), base + b(22) + k * BEAT / 4, .26 + .2 * k / 8, (-1) ** k * .1)
+        place(fx, imp, base + b(24), .55); place(fx, crash(), base + b(24), .45, .1)
+        place(fx, noise_swell(BEAT * 4, 300, 8500, .9, 'rise', .4), base + b(56), .3)
+        for k in range(8):
+            place(fx, snare(.25 + .5 * k / 8), base + b(58) + k * BEAT / 4, .24 + .2 * k / 8, (-1) ** k * .1)
+        place(fx, imp, base + b(60), .5); place(fx, crash(), base + b(60), .45, -.1)
 
-        # ---------------- transitions
-        place(fx, tom(1.0, 87.3), base + b(6), .75)                                  # "אתם"
-        place(fx, tom(1.0, 77.8), base + b(7), .8)                                   # "לא"
-        place(fx, imp, base + b(8), 1.0); place(send, imp, base + b(8), .45)         # "לבד."
-        place(fx, noise_swell(BEAT, 2000, 9000, .8, 'rise', .6), base + b(11), .3)
-        place(fx, reverse_crash(BEAT), base + b(11), .5)
-        place(fx, noise_swell(BEAT * 2, 500, 9000, .9, 'rise', .45), base + b(20), .32)   # riser into the dive
-        place(fx, reverse_crash(BEAT * 2), base + b(22), .6)
-        ts = tt(1.3)
-        place(fx, np.sin(2 * np.pi * np.cumsum(38 + 30 * ts / 1.3) / SR) * (ts / 1.3) ** 2, base + b(22), .5)
-        place(fx, imp, base + b(24), .75); place(fx, crash(), base + b(24), .5, .1)   # drop 1
-        place(fx, noise_swell(BEAT * 1.2, 6000, 500, .7, 'fall', .5), base + b(51), .25)  # into the quote
-        place(fx, noise_swell(BEAT * 4, 300, 8500, 1.0, 'rise', .4), base + b(56), .34)   # call build
-        place(fx, imp, base + b(60), .7); place(fx, crash(), base + b(60), .5, -.1)   # drop 2
-        place(fx, noise_swell(BEAT * 1.5, 8000, 700, .6, 'fall', .5), base + b(69), .2)
-        place(fx, reverse_crash(BEAT * .9), base + b(71.1), .35)
-    return dry, mus, send, dsend, fx, kicks
+    # the arrangement moves with a low-pass on the groove and the music (it never stops)
+    pts = []
+    for loop in range(LOOPS + 1):
+        o = loop * T
+        pts += [(o + b(0), 17000), (o + b(5.6), 17000), (o + b(6.1), 520), (o + b(10.8), 520), (o + b(11.2), 700),
+                (o + b(20), 12000), (o + b(22), 17000), (o + b(50.6), 17000), (o + b(51.2), 1300), (o + b(55.6), 1500),
+                (o + b(59.5), 17000), (o + b(71.9), 17000)]
+    level = np.ones(N)
+    tt_ = np.arange(N) / SR
+    for loop in range(LOOPS + 1):
+        o = loop * T
+        level *= 1 - .45 * np.clip((tt_ - (o + b(5.6))) / .3, 0, 1) * np.clip(((o + b(11.5)) - tt_) / 1.0, 0, 1)
+    groove = autofilter(groove, pts) * level[:, None]
+    mus = autofilter(mus, pts) * (.6 + .4 * level)[:, None]
+    return groove, mus, send, dsend, fx, kicks
 
 
 def sidechain(n, kicks, depth=.5, rel=.14):
@@ -622,12 +551,13 @@ def sfx_bank():
     B = {'click': glass_click(), 'grab': glass_click(.8, .85), 'release': glass_click(.7, 1.15)}
     t = tt(.1)
     B['tick'] = (np.sin(2 * np.pi * 1850 * t) + .6 * np.sin(2 * np.pi * 2870 * t)) * np.exp(-t / .014) * .5
-    B['whoosh'] = tonal_whoosh(.5, 450, 3600, 1.1)
-    B['whooshBig'] = tonal_whoosh(.75, 220, 2800, 1.3)
+    B['whoosh'] = tonal_whoosh(.62, 400, 3200, 1.1)
+    B['whooshBig'] = tonal_whoosh(.9, 200, 2600, 1.3)
     B['fill'] = noise_swell(.6, 5000, 900, 1.0, 'rise', .5) * .9
     B['dive'] = np.concatenate([noise_swell(1.1, 250, 5000, 1.0, 'rise', .45), noise_swell(.5, 5000, 800, 1.0, 'fall', .5)]) * 1.2
     B['swell'] = noise_swell(.6, 1500, 6000, 1.0, 'rise', .6) * .6
     B['mark'] = tonal_whoosh(.28, 2600, 5200, .5, .3, tone=False)
+    B['xdraw'] = tonal_whoosh(.22, 3000, 6500, .5, .3, tone=False)
     B['wipe'] = tonal_whoosh(.5, 3000, 9000, .5, .5)
     B['wipe2'] = tonal_whoosh(.42, 4000, 10000, .42, .5)
     t = tt(.5)   # "denied": two low buzzy notes
@@ -660,9 +590,9 @@ def build_sfx(events, curves, n):
     B = sfx_bank()
     out = np.zeros((n, 2))
     placed = []
-    gains = {'click': .55, 'grab': .5, 'release': .45, 'tick': .3, 'whoosh': .3, 'whooshBig': .34, 'fill': .3, 'dive': .42,
-             'swell': .2, 'mark': .3, 'wipe': .28, 'wipe2': .25, 'shake': .5, 'flip': .35, 'thud': .45, 'sheen': .7,
-             'ring': .3, 'connect': .55, 'ripple': .6}
+    gains = {'click': .36, 'grab': .32, 'release': .3, 'tick': .16, 'whoosh': .2, 'whooshBig': .24, 'fill': .22, 'dive': .34,
+             'swell': .14, 'mark': .2, 'wipe': .2, 'wipe2': .18, 'xdraw': .16, 'flip': .24, 'thud': .3, 'sheen': .55,
+             'ring': .25, 'connect': .45, 'ripple': .45}
     lag = {'whoosh': .07, 'whooshBig': .1, 'wipe': .12, 'wipe2': .1, 'mark': .08}
     count = {}
     pops = ['F5', 'Ab5', 'C6', 'Eb6', 'F6', 'Ab6']
@@ -675,7 +605,7 @@ def build_sfx(events, curves, n):
             continue          # scored in the music, or driven by the curves below
         if k == 'clink':      # logo pieces: tuned metal
             x = metal(midi(['F4', 'C5', 'Eb5', 'Ab5'][min(i, 3)]), .6, .5)
-            g, pan = .5, [-.4, .4, 0, .1][min(i, 3)]
+            g, pan = .38, [-.4, .4, 0, .1][min(i, 3)]
         elif k == 'lock':     # ka-chunk + shimmer
             x = metal(midi('F4'), .7, .8)
             th = B['thud']
@@ -684,13 +614,13 @@ def build_sfx(events, curves, n):
             x[j:j + len(th)] += th * .8
             sh = (bell(midi('F6'), .12, .8) + bell(midi('C7'), .12, .8))[:len(x)]
             x[:len(sh)] += sh
-            g = .55
+            g = .42
         elif k == 'swish':    # tabs: rising tuned ticks
             x = tone_tick(midi(['Ab5', 'C6', 'Eb6'][min(i, 2)]))
-            g, pan = .45, [.35, 0, -.35][min(i, 2)]
+            g, pan = .34, [.35, 0, -.35][min(i, 2)]
         elif k == 'check':    # checklist climbs the F minor chord
             x = tone_tick(midi(['F5', 'Ab5', 'C6', 'F6'][min(i, 3)]))
-            g = .5
+            g = .38
         elif k == 'success':
             x = np.zeros(int(2.2 * SR))
             for j, m_ in enumerate(['F5', 'Ab5', 'C6', 'F6']):
@@ -700,10 +630,10 @@ def build_sfx(events, curves, n):
             g = .45
         elif k in ('pop', 'pop2'):
             x = bubble(midi(pops[min(i if k == 'pop' else i + 2, len(pops) - 1)]))
-            g = .42
+            g = .3
         else:
             x = B[k]
-        if k in ('whoosh', 'whooshBig', 'mark', 'wipe', 'wipe2'):
+        if k in ('whoosh', 'whooshBig', 'mark', 'wipe', 'wipe2', 'xdraw'):
             po = int(len(x) * .5)
         elif k == 'fill':
             po = int(len(x) * .98)
@@ -724,7 +654,7 @@ def build_sfx(events, curves, n):
     for tk in curves['odo']:
         c = glass_click(.35, 1.4 + .05 * tk['i'])
         for loop in range(LOOPS + 1):
-            place(out, c, loop * T + tk['t'], .5, -.4 + .08 * tk['i'])
+            place(out, c, loop * T + tk['t'], .3, -.4 + .08 * tk['i'])
 
     # slide-to-call: a zip that rises with the knob, strains past the end, then settles
     kn = curves['knob']
@@ -736,7 +666,7 @@ def build_sfx(events, curves, n):
     f = 260 * 2 ** (np.clip(va, 0, 1.2) * 2.2)
     zp = lp(saw(f, ta) * .5 + bp(rng.standard_normal(len(ta)), 1500, 6000) * .5, 5000) * amp
     for loop in range(LOOPS + 1):
-        place(out, zp * .22, loop * T + ta[0], 1.0, .1)
+        place(out, zp * .15, loop * T + ta[0], 1.0, .1)
     return out, placed
 
 
@@ -794,12 +724,13 @@ def main():
     data = json.load(open(ev_path))
     events, curves = data['events'], data['curves']
     assert abs(data['T'] - T) < 1e-6 and data['BPM'] == BPM, 'timeline and score disagree'
-    dry, mus, send, dsend, fx, kicks = compose()
-    mus *= sidechain(N, kicks)[:, None]
-    music = dry * .9 + mus * .85 + convolve(send, reverb_ir(2.3)) * .3 + pingpong(dsend, BEAT * .75, .36, 5) * .38 + fx * .85
+    groove, mus, send, dsend, fx, kicks = compose()
+    sc_ = sidechain(N, kicks, depth=.38, rel=.16)[:, None]
+    music = groove * .9 + mus * sc_ * .9 + convolve(send, reverb_ir(2.4)) * .28 + pingpong(dsend, BEAT * .75, .34, 5) * .34 + fx * .85
     music = hp(music, 32, 4)
     music = music - lp(music, 95, 2) * .45            # phones can't play the deep sub anyway
-    music = music + bp(music, 180, 520, 1) * .5       # body in the low mids
+    music = music + bp(music, 180, 520, 1) * .22      # a little body in the low mids
+    music = music + hp(music, 3500, 2) * .6           # presence and air for phone speakers
 
     # the player scrub: the soundtrack is dragged with the video (it rewinds, then fast-forwards)
     sc = curves['scrub']

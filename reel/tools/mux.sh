@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Encode the lossless master for Instagram and mux the soundtrack.
-#   out/bada-law-reel.mp4            30 fps, H.264 Main@4.0 - plays everywhere (music + UI sounds, -14 LUFS)
-#   out/bada-law-reel-60fps.mp4      60 fps, H.264 High@4.2
-#   out/bada-law-reel-sfx-only.mp4   30 fps, UI sounds only (to add a track inside Instagram)
+#   out/bada-law-reel.mp4            60 fps, H.264 Main@4.2 - the smooth one (music + UI sounds, -14 LUFS)
+#   out/bada-law-reel-30fps.mp4      30 fps, H.264 Main@4.0 - fallback for players that refuse 60 fps
+#   out/bada-law-reel-sfx-only.mp4   60 fps, UI sounds only (to add a track inside Instagram)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 V="$1"; WORK="${2:-$(dirname "$1")}"
@@ -11,7 +11,7 @@ COLOR="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
 ffmpeg -v error -y -i "$V" -vf "tmix=frames=2:weights='1 1',select='eq(mod(n\,2)\,1)',setpts=N/30/TB,format=yuv420p" -r 30 \
   -c:v libx264 -preset slow -crf 17 -profile:v main -level 4.0 -pix_fmt yuv420p $COLOR -an "$WORK/v30.mp4"
 ffmpeg -v error -y -i "$V" -vf "format=yuv420p" -r 60 \
-  -c:v libx264 -preset slow -crf 16 -profile:v high -level 4.2 -pix_fmt yuv420p $COLOR -an "$WORK/v60.mp4"
+  -c:v libx264 -preset slow -crf 16 -profile:v main -level 4.2 -pix_fmt yuv420p $COLOR -an "$WORK/v60.mp4"
 # audio: linear gain to the loudness target (no dynamic processing), AAC
 lufs() { ffmpeg -hide_banner -nostats -i "$1" -af ebur128 -f null - 2>&1 | awk '/I:/{v=$2} END{print v}'; }
 aac() { # wav, target LUFS, out
@@ -22,7 +22,7 @@ aac() { # wav, target LUFS, out
 aac out/mix.wav -14 "$WORK/mix.m4a"
 aac out/sfx.wav -21 "$WORK/sfx.m4a"
 mux() { ffmpeg -v error -y -i "$1" -i "$2" -map 0:v -map 1:a -c copy -shortest -movflags +faststart "$3"; }
-mux "$WORK/v30.mp4" "$WORK/mix.m4a" out/bada-law-reel.mp4
-mux "$WORK/v60.mp4" "$WORK/mix.m4a" out/bada-law-reel-60fps.mp4
-mux "$WORK/v30.mp4" "$WORK/sfx.m4a" out/bada-law-reel-sfx-only.mp4
+mux "$WORK/v60.mp4" "$WORK/mix.m4a" out/bada-law-reel.mp4
+mux "$WORK/v30.mp4" "$WORK/mix.m4a" out/bada-law-reel-30fps.mp4
+mux "$WORK/v60.mp4" "$WORK/sfx.m4a" out/bada-law-reel-sfx-only.mp4
 ls -la out/*.mp4
