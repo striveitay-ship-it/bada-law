@@ -1,0 +1,10 @@
+# Footage and renders stay out of this (public) repository: the clips are of a child.
+*.mp4
+*.mov
+*.m4a
+*.wav
+*.npy
+*.jpg
+*.png
+*.pkl
+out/
