@@ -14,6 +14,6 @@ else
 fi
 ffmpeg -v error -y -i "$1" -ss "$S0" -t "$DUR" -i "$2" \
   -map 0:v:0 -map 1:a:0 "${V[@]}" \
-  -af "afade=t=in:d=0.02,afade=t=out:st=$ST:d=$FADE" -c:a aac -b:a 256k -ar 44100 \
+  -af "volume=-1.2dB,afade=t=in:d=0.02,afade=t=out:st=$ST:d=$FADE" -c:a aac -b:a 256k -ar 44100 \
   -t "$DUR" -movflags +faststart "$3"
 echo "$3: $(ffprobe -v error -show_entries format=duration -of csv=p=0 "$3")s"
