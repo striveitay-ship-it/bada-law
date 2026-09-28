@@ -1,49 +1,85 @@
-"""Edit decisions: every cut, speed ramp, zoom and flash, placed on the song's beat grid.
+"""Edit decisions: every cut, speed ramp, camera hit and flash, locked to the song's real hits.
 
-Song: "Montagem Zora (Slowed)", 101.98 BPM. The drop lands at 10.666 s of the sound file.
-All times below are *sound* times (seconds into the sound file); the video starts at S0.
+Song: "Montagem Zora (Slowed)", 101.98 BPM. All times are *sound* times (seconds into the
+sound file); the video starts at S0, the same point in the song as the reference edit.
+
+The groove is not a straight grid: per bar the hits land on sixteenths 0, 3, 4.25, 6, 7,
+8.25, 10, 12, 14 (the 4.25 and 8.25 hits are swung ~37 ms late). HITS below are the onsets
+measured from the sound file itself, and every visual event is placed on them with the
+same small lead the reference edit uses (the picture moves 15-35 ms before the sound).
 """
+import math
+
 import numpy as np
 
 BPM = 101.98
-Q = 60.0 / BPM          # quarter note
-SIX = Q / 4.0           # sixteenth note
+Q = 60.0 / BPM
+SIX = Q / 4.0
 BAR = 4.0 * Q
-DROP = 0.076 + 18 * Q   # first downbeat of the drop (10.666 s)
-
-
-def d(n, s=0.0):
-    """Sound time of sixteenth `s` in drop bar `n` (bar 1 starts on the drop)."""
-    return DROP + (n - 1) * BAR + s * SIX
-
-
-S0 = 5.576              # sound time of the first video frame (same start as the reference edit)
-END_BLACK = d(7, 0)     # picture goes to black on the downbeat after the last bar
-END = END_BLACK + 0.5   # short black tail while the music rings out
+DROP = 0.076 + 18 * Q   # grid downbeat of the drop (10.666 s); the drop's snare hits at 10.721
 FPS = 60
-NEG_HALF = 0.035        # negative flash: 4 frames around the "3" of every bar
+FR = 1.0 / FPS
+S0 = 5.576              # first video frame (same start as the reference edit)
+
+# Measured onsets per drop bar: (sixteenth, sound time, strength) - strength is the
+# normalised spectral-flux peak (>=1.1 strong, 0.75-1.1 medium).
+HITS = {
+    1: [(0, 10.673, 1.3), (0.37, 10.721, 1.0), (1, 10.813, 0.61), (3, 11.107, 0.68), (4.25, 11.291, 0.88),
+        (6, 11.548, 1.18), (7, 11.696, 0.89), (8.25, 11.880, 0.90), (10, 12.135, 1.61),
+        (12, 12.429, 1.18), (14, 12.724, 1.29)],
+    2: [(0, 13.017, 1.38), (3, 13.458, 1.48), (4.25, 13.645, 0.77), (6, 13.899, 1.40),
+        (7, 14.048, 0.68), (8.25, 14.233, 0.72), (10, 14.488, 1.56), (12, 14.782, 1.23),
+        (12.55, 14.866, 0.74), (14, 15.079, 0.72)],
+    3: [(0, 15.370, 1.52), (3, 15.812, 1.20), (4.25, 15.998, 0.76), (6, 16.253, 1.36),
+        (7, 16.401, 1.00), (8.25, 16.586, 0.82), (10, 16.840, 1.54), (12, 17.135, 1.37),
+        (14, 17.429, 1.22)],
+    4: [(0, 17.723, 1.48), (3, 18.164, 0.91), (4, 18.312, 1.27), (6, 18.606, 1.14),
+        (7, 18.753, 0.68), (8.25, 18.948, 0.73), (10, 19.193, 0.97), (12, 19.489, 1.25),
+        (13, 19.636, 0.78), (14, 19.783, 0.88)],
+    5: [(0, 20.076, 1.28), (3, 20.516, 1.25), (4.25, 20.703, 0.79), (6, 20.957, 1.64),
+        (7, 21.106, 0.99), (8.25, 21.322, 0.81), (10, 21.547, 1.59), (12, 21.841, 1.22),
+        (14, 22.137, 1.22)],
+    6: [(0, 22.429, 1.55), (3, 22.870, 1.27), (4.25, 23.057, 0.85), (6, 23.311, 1.69),
+        (8.25, 23.644, 0.79), (10, 23.901, 1.24), (12, 24.194, 1.17), (14, 24.491, 0.73)],
+    7: [(0, 24.783, 1.04)],
+}
+
+
+def h(n, s):
+    """Measured time of the hit at sixteenth `s` of drop bar `n`."""
+    for pos, t, _ in HITS[n]:
+        if abs(pos - s) < 0.2:
+            return t
+    raise KeyError((n, s))
+
+
+CUT = lambda t: t - FR          # cuts land one frame ahead of the hit, like the reference
+NEG = lambda n: (h(n, 3) - 0.035, h(n, 3) + 0.035)    # 4-frame negative on the "3"
+AFTER_NEG = lambda n: h(n, 3) + 0.035                 # reference cuts right out of the negative
+END_BLACK = CUT(h(7, 0))
+END = END_BLACK + 0.5
 
 
 class Shot:
-    def __init__(self, clip, t0, t1, anchor, speed, zoom, exit=None, off=(0.0, 0.0), roll=0.0):
+    def __init__(self, clip, t0, t1, anchor, speed, zoom, entry=(0.18, 0.10), exit=(0.10, 0.05),
+                 off=(0.0, 0.0)):
         self.clip, self.t0, self.t1 = clip, t0, t1
         self.anchor = anchor            # (sound time, source time) that must line up
         self.speed = speed              # [(sound time, playback speed)], eased between keys
         self.zoom = zoom                # [(sound time, zoom)], eased between keys
-        self.exit = exit                # (extra zoom, duration): accelerating push into the next cut
-        self.off = off                  # framing offset (fraction of frame) added to the subject track
-        self.roll = roll                # degrees of roll at the cut, settling out
+        self.entry = entry              # (zoom, tau): starts pushed in and whips out after the cut
+        self.exit = exit                # (zoom, dur): accelerating push into the next cut
+        self.off = off
 
 
 def eased(keys, t):
-    ks = keys
-    if t <= ks[0][0]:
-        return ks[0][1]
-    for (ta, va), (tb, vb) in zip(ks, ks[1:]):
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (ta, va), (tb, vb) in zip(keys, keys[1:]):
         if t <= tb:
             u = (t - ta) / (tb - ta)
             return va + (vb - va) * u * u * (3 - 2 * u)
-    return ks[-1][1]
+    return keys[-1][1]
 
 
 # Where the subject is in each clip (source time, x, y as fractions of the upright frame).
@@ -63,112 +99,123 @@ TRACK = {
     "4605": [(0.0, 0.50, 0.32), (4.7, 0.50, 0.32)],
 }
 
-N3 = lambda n: d(n, 3) + NEG_HALF   # cut hidden under each bar's negative flash
+B3 = CUT(h(3, 0)) - 0.047       # bar 3 and bar 6 open out of a short black, like the reference
+B6 = CUT(h(6, 0)) - 0.047
 
 SHOTS = [
-    # Intro: real time, then slow motion on the take-off so the dunk lands exactly on the drop.
-    Shot("4598", S0, d(1, 0), anchor=(d(1, 0), 5.09),
+    # Intro: real time, then slow motion on the take-off; the ball goes in on the drop.
+    Shot("4598", S0, DROP, anchor=(10.69, 5.09),
          speed=[(9.45, 1.0), (9.95, 0.42), (10.40, 0.30)],
-         zoom=[(S0, 1.06), (9.40, 1.13), (d(1, 0), 1.24)]),
-    # Bar 1 - the dunk: hang on the rim in slow motion, land, celebrate, run at the camera.
-    Shot("4598", d(1, 0), N3(1), anchor=(d(1, 0), 5.09),
-         speed=[(d(1, 0), 0.30), (d(1, 2), 0.30), (d(1, 3), 0.55)],
-         zoom=[(d(1, 0), 1.04), (d(1, 3), 1.09)]),
-    Shot("4598", N3(1), d(1, 8), anchor=(N3(1), 5.60),
-         speed=[(d(1, 3.3), 1.0), (d(1, 5), 0.9), (d(1, 6), 0.35)],
-         zoom=[(N3(1), 1.12), (d(1, 8), 1.20)], exit=(0.10, 0.09)),
-    Shot("4598", d(1, 8), d(2, 0), anchor=(d(1, 8), 7.78),
-         speed=[(d(1, 8), 1.0), (d(1, 12), 0.9), (d(1, 14), 0.45)],
-         zoom=[(d(1, 8), 1.12), (d(1, 12), 1.24), (d(2, 0), 1.30)], exit=(0.25, 0.12)),
+         zoom=[(S0, 1.06), (9.40, 1.13), (DROP, 1.24)], entry=None, exit=None),
+    # Bar 1 - the dunk: hang on the rim, land and celebrate, run at the camera.
+    Shot("4598", DROP, AFTER_NEG(1), anchor=(10.69, 5.09),
+         speed=[(DROP, 0.30), (h(1, 1), 0.30), (h(1, 3), 0.55)],
+         zoom=[(DROP, 1.06), (AFTER_NEG(1), 1.10)], entry=None),
+    Shot("4598", AFTER_NEG(1), CUT(h(1, 8.25)), anchor=(AFTER_NEG(1), 5.60),
+         speed=[(AFTER_NEG(1) + 0.03, 1.0), (h(1, 4.25) + 0.08, 0.9),
+                (h(1, 6) - 0.02, 0.35)],
+         zoom=[(AFTER_NEG(1), 1.12), (CUT(h(1, 8.25)), 1.18)]),
+    Shot("4598", CUT(h(1, 8.25)), CUT(h(2, 0)), anchor=(CUT(h(1, 8.25)), 7.80),
+         speed=[(CUT(h(1, 8.25)), 1.0), (h(1, 12), 0.9), (h(1, 14), 0.45)],
+         zoom=[(CUT(h(1, 8.25)), 1.12), (h(1, 12), 1.20), (CUT(h(2, 0)), 1.26)], exit=(0.16, 0.06)),
     # Bar 2 - the scream, right in the lens.
-    Shot("4598", d(2, 0), N3(2), anchor=(d(2, 0), 9.40),
-         speed=[(d(2, 0), 0.30)], zoom=[(d(2, 0), 1.06), (d(2, 3), 1.12)]),
-    Shot("4598", N3(2), d(2, 6.4), anchor=(N3(2), 9.62),
-         speed=[(N3(2), 0.55)], zoom=[(N3(2), 1.08), (d(2, 6.4), 1.14)]),
-    Shot("4598", d(2, 6.4), d(2, 10), anchor=(d(2, 6.4), 10.05),
-         speed=[(d(2, 6.4), 0.75)], zoom=[(d(2, 6.4), 1.10), (d(2, 10), 1.18)]),
-    Shot("4606", d(2, 10), d(2, 15.5), anchor=(d(2, 10), 0.95),
-         speed=[(d(2, 10), 0.75)], zoom=[(d(2, 10), 1.45), (d(2, 15.5), 1.55)]),
-    # Bar 3 - off the bed: hang in the air, land on the kick, walk up, arm out.
-    Shot("4606", d(3, 0), d(3, 12), anchor=(d(3, 4), 2.07),
-         speed=[(d(3, 0), 0.30), (d(3, 2.5), 0.30), (d(3, 3.8), 1.30), (d(3, 4.6), 0.45),
-                (d(3, 8), 0.45), (d(3, 10), 0.9)],
-         zoom=[(d(3, 0), 1.40), (d(3, 4), 1.25), (d(3, 12), 1.30)]),
-    Shot("4606", d(3, 12), d(4, 0), anchor=(d(3, 12), 4.72),
-         speed=[(d(3, 12), 0.80)], zoom=[(d(3, 12), 1.20), (d(4, 0), 1.28)], exit=(0.30, 0.12)),
-    # Bar 4 - the fight.
-    Shot("4602", d(4, 0), N3(4), anchor=(d(4, 3), 1.80),
-         speed=[(d(4, 0), 0.80)], zoom=[(d(4, 0), 1.14), (N3(4), 1.20)]),
-    Shot("4602", N3(4), d(4, 6.4), anchor=(d(4, 6), 2.63),
-         speed=[(N3(4), 0.80)], zoom=[(N3(4), 1.14), (d(4, 6.4), 1.20)]),
-    Shot("4602", d(4, 6.4), d(4, 14), anchor=(d(4, 10), 3.17),
-         speed=[(d(4, 9.5), 0.80), (d(4, 10.5), 0.70)],
-         zoom=[(d(4, 6.4), 1.14), (d(4, 14), 1.24)]),
-    Shot("4602", d(4, 14), d(5, 0), anchor=(d(4, 14), 3.90),
-         speed=[(d(4, 14), 0.90)], zoom=[(d(4, 14), 1.16), (d(5, 0), 1.26)], exit=(0.30, 0.12)),
-    # Bar 5 - the dance.
-    Shot("4607", d(5, 0), N3(5), anchor=(d(5, 2.5), 1.00),
-         speed=[(d(5, 0), 0.55)], zoom=[(d(5, 0), 1.34), (N3(5), 1.40)]),
-    Shot("4607", N3(5), d(5, 6.4), anchor=(d(5, 6), 1.47),
-         speed=[(N3(5), 0.60)], zoom=[(N3(5), 1.34), (d(5, 6.4), 1.40)]),
-    Shot("4607", d(5, 6.4), d(5, 10), anchor=(d(5, 8), 3.70),
-         speed=[(d(5, 6.4), 0.75)], zoom=[(d(5, 6.4), 1.34), (d(5, 10), 1.42)]),
-    Shot("4607", d(5, 10), d(5, 14), anchor=(d(5, 12), 6.07),
-         speed=[(d(5, 10), 0.75)], zoom=[(d(5, 10), 1.34), (d(5, 14), 1.42)]),
-    Shot("4607", d(5, 14), d(5, 15.5), anchor=(d(5, 15), 7.85),
-         speed=[(d(5, 14), 0.80)], zoom=[(d(5, 14), 1.36), (d(5, 15.5), 1.46)]),
-    # Bar 6 - the finisher: L on the forehead, push into the face.
-    Shot("4605", d(6, 0), d(6, 8), anchor=(d(6, 0), 0.28),
-         speed=[(d(6, 0), 0.72)], zoom=[(d(6, 0), 1.20), (d(6, 8), 1.36)]),
-    Shot("4605", d(6, 8), END_BLACK, anchor=(d(6, 8), 1.35),
-         speed=[(d(6, 8), 0.80), (d(6, 14), 0.30)],
-         zoom=[(d(6, 8), 1.36), (d(6, 14), 1.72), (END_BLACK, 1.85)]),
+    Shot("4598", CUT(h(2, 0)), AFTER_NEG(2), anchor=(h(2, 0), 9.40),
+         speed=[(h(2, 0), 0.30)], zoom=[(h(2, 0), 1.08), (h(2, 3), 1.12)], entry=(0.24, 0.10)),
+    Shot("4598", AFTER_NEG(2), CUT(h(2, 8.25)), anchor=(AFTER_NEG(2), 9.62),
+         speed=[(AFTER_NEG(2), 0.55)], zoom=[(AFTER_NEG(2), 1.08), (CUT(h(2, 8.25)), 1.14)]),
+    Shot("4598", CUT(h(2, 8.25)), CUT(h(2, 12)), anchor=(CUT(h(2, 8.25)), 10.05),
+         speed=[(CUT(h(2, 8.25)), 0.75)], zoom=[(CUT(h(2, 8.25)), 1.10), (CUT(h(2, 12)), 1.16)]),
+    Shot("4606", CUT(h(2, 12)), B3 - 0.083, anchor=(CUT(h(2, 12)), 1.10),
+         speed=[(CUT(h(2, 12)), 0.75)], zoom=[(CUT(h(2, 12)), 1.45), (B3, 1.55)], exit=None),
+    # Bar 3 - off the bed: float in the air, land on the 4.25 hit, walk up; then the arm out.
+    Shot("4606", B3, CUT(h(3, 12)), anchor=(h(3, 4.25) - 0.02, 2.07),
+         speed=[(B3, 0.30), (h(3, 3) - 0.05, 0.30), (h(3, 4.25) - 0.05, 1.30), (h(3, 4.25) + 0.08, 0.45),
+                (h(3, 8.25), 0.45), (h(3, 10), 0.9)],
+         zoom=[(B3, 1.40), (h(3, 4.25), 1.25), (CUT(h(3, 12)), 1.30)], entry=(0.24, 0.10)),
+    Shot("4606", CUT(h(3, 12)), CUT(h(4, 0)), anchor=(CUT(h(3, 12)), 4.72),
+         speed=[(CUT(h(3, 12)), 0.80)], zoom=[(CUT(h(3, 12)), 1.20), (CUT(h(4, 0)), 1.28)],
+         exit=(0.16, 0.06)),
+    # Bar 4 - the fight: strikes (motion peaks 1.80, 2.50, 2.63, 3.17) on the hits.
+    Shot("4602", CUT(h(4, 0)), AFTER_NEG(4), anchor=(h(4, 3), 1.80),
+         speed=[(CUT(h(4, 0)), 0.80)], zoom=[(CUT(h(4, 0)), 1.14), (AFTER_NEG(4), 1.20)],
+         entry=(0.24, 0.10)),
+    Shot("4602", AFTER_NEG(4), CUT(h(4, 8.25)), anchor=(h(4, 6), 2.63),
+         speed=[(AFTER_NEG(4), 0.80)], zoom=[(AFTER_NEG(4), 1.14), (CUT(h(4, 8.25)), 1.20)]),
+    Shot("4602", CUT(h(4, 8.25)), CUT(h(4, 12)), anchor=(h(4, 10), 3.17),
+         speed=[(CUT(h(4, 8.25)), 0.80)], zoom=[(CUT(h(4, 8.25)), 1.14), (CUT(h(4, 12)), 1.20)]),
+    Shot("4602", CUT(h(4, 12)), CUT(h(5, 0)), anchor=(CUT(h(4, 12)), 4.00),   # 3.4-3.9: holder's hand
+         speed=[(CUT(h(4, 12)), 0.75)], zoom=[(CUT(h(4, 12)), 1.16), (CUT(h(5, 0)), 1.24)],
+         exit=(0.16, 0.06)),
+    # Bar 5 - the dance (moves 1.00, 1.47, 3.70, 6.07 on the hits).
+    Shot("4607", CUT(h(5, 0)), AFTER_NEG(5), anchor=(h(5, 3) - 0.07, 1.00),
+         speed=[(CUT(h(5, 0)), 0.55)], zoom=[(CUT(h(5, 0)), 1.34), (AFTER_NEG(5), 1.40)],
+         entry=(0.24, 0.10)),
+    Shot("4607", AFTER_NEG(5), CUT(h(5, 8.25)), anchor=(h(5, 6), 1.47),
+         speed=[(AFTER_NEG(5), 0.60)], zoom=[(AFTER_NEG(5), 1.34), (CUT(h(5, 8.25)), 1.40)]),
+    Shot("4607", CUT(h(5, 8.25)), CUT(h(5, 12)), anchor=(h(5, 10), 3.70),
+         speed=[(CUT(h(5, 8.25)), 0.75)], zoom=[(CUT(h(5, 8.25)), 1.34), (CUT(h(5, 12)), 1.42)]),
+    Shot("4607", CUT(h(5, 12)), B6 - 0.083, anchor=(h(5, 12), 6.07),
+         speed=[(CUT(h(5, 12)), 0.75)], zoom=[(CUT(h(5, 12)), 1.36), (B6, 1.46)], exit=None),
+    # Bar 6 - the finisher: L on the forehead, push into the face, last beats in black and white.
+    Shot("4605", B6, CUT(h(6, 8.25)), anchor=(B6, 0.25),
+         speed=[(B6, 0.72)], zoom=[(B6, 1.20), (CUT(h(6, 8.25)), 1.36)], entry=(0.24, 0.10)),
+    Shot("4605", CUT(h(6, 8.25)), END_BLACK, anchor=(CUT(h(6, 8.25)), 1.30),
+         speed=[(CUT(h(6, 8.25)), 0.80), (h(6, 14), 0.30)],
+         zoom=[(CUT(h(6, 8.25)), 1.34), (h(6, 14), 1.70), (END_BLACK, 1.82)], exit=None),
 ]
 
-# ---- camera / light events -------------------------------------------------------------
-PUNCH = []   # (time, amount, tau): cut-style zoom kick that settles back
-SHAKE = []   # (time, px, deg, tau, hz)
-WHITE = []   # (time, strength, tau)
-GLOW = []    # (time, amount, tau)
-FLASH = []   # (t0, t1, kind) kind in {"neg", "mono", "black"}
-
-# the dunk on the drop
-WHITE.append((d(1, 0), 0.85, 0.10))
-GLOW.append((d(1, 0), 0.55, 0.45))
-PUNCH.append((d(1, 0), 0.20, 0.22))
-SHAKE.append((d(1, 0), 55, 2.2, 0.28, 11.0))
-
+# ---- light ---------------------------------------------------------------------------------
+WHITE = [(10.667, 0.85, 0.10)]                    # (start, strength, tau): the dunk
+GLOW = [(10.667, 0.55, 0.45)]                     # (start, amount, tau)
+FLASH = []                                        # (t0, t1, kind) kind in {"neg", "mono", "black"}
 for n in range(1, 7):
-    FLASH.append((d(n, 3) - NEG_HALF, d(n, 3) + NEG_HALF, "neg"))
-    FLASH.append((d(n, 5.6), d(n, 6.4), "mono"))
-    if n > 1:
-        GLOW.append((d(n, 0), 0.30, 0.30))
-
-FLASH.append((d(2, 15.5), d(3, 0), "black"))
-FLASH.append((d(5, 15.5), d(6, 0), "black"))
-FLASH.append((d(6, 14), END_BLACK, "mono"))
+    FLASH.append((*NEG(n), "neg"))
+    FLASH.append((h(n, 6) - 0.06, h(n, 6) + 0.05, "mono"))
+FLASH.append((B3 - 0.083, B3, "black"))
+FLASH.append((B6 - 0.083, B6, "black"))
+FLASH.append((h(6, 14) - 0.03, END_BLACK, "mono"))
 FLASH.append((END_BLACK, END + 1, "black"))
 
-# every cut gets a kick; downbeats and the landing get the big ones
-for s in SHOTS[1:]:
-    big = abs((s.t0 - DROP) / BAR - round((s.t0 - DROP) / BAR)) < 1e-3
-    PUNCH.append((s.t0, 0.16 if big else 0.10, 0.16 if big else 0.12))
-    SHAKE.append((s.t0, 38 if big else 22, 1.4 if big else 0.8, 0.22 if big else 0.14, 12.0))
+# ---- camera hits ------------------------------------------------------------------------------
+# BUMP: zoom pushes in over two frames, peaking just before the hit, then settles (t_peak, amount, tau)
+# JOLT: one smooth swing of the frame starting just before the hit (t0, px, deg, angle, hz, tau)
+BUMP, JOLT = [], []
+LEAD = 0.012
 
-# landing off the bed on the sub kick
-PUNCH.append((d(3, 4), 0.14, 0.18))
-SHAKE.append((d(3, 4), 45, 1.8, 0.25, 10.0))
-# accents inside longer shots
-for t in [d(1, 12), d(1, 14), d(3, 8), d(3, 10), d(6, 10), d(6, 12), d(6, 14)]:
-    PUNCH.append((t, 0.06, 0.10))
-    SHAKE.append((t, 14, 0.5, 0.10, 13.0))
-# kicks on the sub hits (16ths 4 and 8) where the shot keeps rolling
-for n in (2, 4, 5):
-    for s in (4, 8):
-        SHAKE.append((d(n, s), 16, 0.6, 0.12, 12.0))
+
+def _cut_near(t):
+    return any(abs(s.t0 - t) < 0.06 for s in SHOTS[1:]) or any(abs(s.t0 - (t + 0.035)) < 0.01 for s in SHOTS)
+
+
+SPECIAL = {(1, 0), (1, 0.37), (3, 4.25)}   # the dunk and the landing get their own hits below
+_rng = np.random.default_rng(7)
+for n in range(1, 7):
+    for pos, t, st in HITS[n]:
+        if st < 0.7 or (n, pos) in SPECIAL:
+            continue
+        ang = float(_rng.uniform(0, 2 * math.pi))
+        big = st >= 1.1
+        if _cut_near(t):
+            # the cut itself carries the hit (entry whip); add a swing of the frame
+            JOLT.append((t - 0.03, 30 if big else 20, 1.4 if big else 0.9, ang, 3.2, 0.11))
+            continue
+        BUMP.append((t - LEAD, 0.11 if big else 0.06, 0.13))
+        JOLT.append((t - 0.03, 18 if big else 10, 0.8 if big else 0.4, ang, 3.2, 0.11))
+
+# the drop: dunk impact - starts pushed in, whips out to reveal the hoop, big swing
+BUMP.append((10.667, 0.34, 0.16))
+JOLT.append((10.655, 48, 2.2, 0.6, 3.0, 0.13))
+# the landing off the bed
+BUMP.append((h(3, 4.25) - LEAD, 0.14, 0.15))
+JOLT.append((h(3, 4.25) - 0.03, 40, 1.6, 1.9, 3.0, 0.12))
+
+for n in range(2, 7):
+    GLOW.append((h(n, 0) - 0.02, 0.30, 0.30))
+for n in range(1, 7):
+    GLOW.append((h(n, 10) - 0.02, 0.18, 0.20))
 
 
 def look_strength(t):
-    if t >= d(1, 0):
+    if t >= 10.667:
         return 1.0
-    return 0.3 * float(np.clip((t - 9.4) / (d(1, 0) - 9.4), 0, 1)) ** 2
+    return 0.3 * float(np.clip((t - 9.4) / (10.667 - 9.4), 0, 1)) ** 2

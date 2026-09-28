@@ -106,48 +106,73 @@ def shot_at(t):
 
 
 # ---- camera ------------------------------------------------------------------------------
-def punch_at(t):
+def bump_env(t, tp, tau):
+    """Zoom push: rises over two frames into tp, then settles exponentially."""
+    rise = 2 * E.FR
+    if t < tp - rise:
+        return 0.0
+    if t < tp:
+        u = (t - (tp - rise)) / rise
+        return u * u * (3 - 2 * u)
+    u = t - tp
+    return math.exp(-u / tau) if u < 7 * tau else 0.0
+
+
+_JN = {}
+
+
+def jolt_env(u, hz, tau):
+    """One smooth swing (damped sine) normalised to peak 1, moving fastest at u=0."""
+    if u < 0 or u > 6 * tau:
+        return 0.0
+    w = 2 * math.pi * hz
+    if (hz, tau) not in _JN:
+        us = math.atan(w * tau) / w
+        _JN[(hz, tau)] = math.exp(-us / tau) * math.sin(w * us)
+    return math.exp(-u / tau) * math.sin(w * u) / _JN[(hz, tau)]
+
+
+def zoom_mult(k, t):
     m = 1.0
-    for t0, a, tau in E.PUNCH:
-        u = t - t0
-        if 0 <= u < 8 * tau:
+    for tp, a, tau in E.BUMP:
+        e = bump_env(t, tp, tau)
+        if e:
+            m *= 1 + a * e
+    s = SHOTS[k].s
+    if s.entry and t >= s.t0:
+        a, tau = s.entry
+        u = t - s.t0
+        if u < 7 * tau:
             m *= 1 + a * math.exp(-u / tau)
+    if s.exit:
+        a, dur = s.exit
+        u = (t - (s.t1 - dur)) / dur
+        if u > 0:
+            m *= 1 + a * min(u, 1.0) ** 2
     return m
 
 
-def shake_at(t):
+def jolt_at(t):
     dx = dy = rot = 0.0
-    for k, (t0, px, deg, tau, hz) in enumerate(E.SHAKE):
-        u = t - t0
-        if u < 0 or u > 7 * tau:
-            continue
-        e = math.exp(-u / tau)
-        ph = k * 1.7
-        w = 2 * math.pi * hz * u
-        dx += px * e * math.sin(w + ph)
-        dy += 0.8 * px * e * math.sin(1.13 * w + ph + 1.1)
-        rot += deg * e * math.sin(0.87 * w + ph + 2.3)
+    for t0, px, deg, ang, hz, tau in E.JOLT:
+        g = jolt_env(t - t0, hz, tau)
+        if g:
+            dx += px * g * math.cos(ang)
+            dy += px * g * math.sin(ang)
+            rot += deg * g * (1 if math.sin(ang) >= 0 else -1)
     return dx, dy, rot
-
-
-def exit_mult(s, t):
-    if not s.exit:
-        return 1.0
-    a, dur = s.exit
-    u = (t - (s.t1 - dur)) / dur
-    return 1.0 if u <= 0 else 1.0 + a * min(u, 1.0) ** 2
 
 
 def matrix(k, t, src_t, ow, oh):
     s = SHOTS[k].s
     c = clip(s.clip)
-    z = E.eased(s.zoom, t) * punch_at(t) * exit_mult(s, t)
+    z = E.eased(s.zoom, t) * zoom_mult(k, t)
     fx, fy = c.focus(src_t)
     Fx, Fy = (fx + s.off[0]) * SW, (fy + s.off[1]) * SH
     hw, hh = SW / (2 * z), SH / (2 * z)
     Fx = min(max(Fx, hw), SW - hw)
     Fy = min(max(Fy, hh), SH - hh)
-    dx, dy, rot = shake_at(t)
+    dx, dy, rot = jolt_at(t)
     sc = ow / SW
     zz = z * sc
     r = math.radians(rot)
